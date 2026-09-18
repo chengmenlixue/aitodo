@@ -1,0 +1,13 @@
+# 构建产物与本地工具链（5GB+，切勿上传）
+build/
+.build/
+
+# 下载的安装包
+*.pkg
+
+# 系统文件
+.DS_Store
+
+# 调试输出
+/tmp/
+aitodo_debug.log
