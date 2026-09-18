@@ -32,6 +32,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         if ReminderCenter.isAvailable {
             UNUserNotificationCenter.current().delegate = self
         }
+        ScreenshotManager.shared.registerHotkey()
         if let path = ProcessInfo.processInfo.environment["AITODO_SNAPSHOT"] {
             DispatchQueue.main.asyncAfter(deadline: .now() + 2) { Self.snapshot(to: path) }
             // 第二张：供运行中外部修改 defaults 后对比（验证皮肤即时切换）

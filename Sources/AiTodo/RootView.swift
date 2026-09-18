@@ -7,6 +7,7 @@ extension Notification.Name {
 
 struct RootView: View {
     @EnvironmentObject private var store: TaskStore
+    @StateObject private var screenshot = ScreenshotManager.shared
     @AppStorage("skin") private var skinRaw = AppSkin.classic.rawValue
     @State private var draft = ProcessInfo.processInfo.environment["AITODO_DEMO_DRAFT"] ?? ""
     @State private var selectedQuadrant: Quadrant = .importantNotUrgent
@@ -62,6 +63,20 @@ struct RootView: View {
             }
         }
         .onChange(of: skinRaw) { _ in Self.applyAppAppearance() }
+        .sheet(isPresented: Binding(
+            get: { screenshot.phase == .results },
+            set: { if !$0 { screenshot.dismissResults() } }
+        )) {
+            AIResultPanel(manager: screenshot)
+        }
+        .alert("截图解析失败", isPresented: Binding(
+            get: { screenshot.lastError != nil },
+            set: { if !$0 { screenshot.dismissError() } }
+        )) {
+            Button("知道了", role: .cancel) {}
+        } message: {
+            Text(screenshot.lastError ?? "")
+        }
     }
 
     /// 纯白皮肤使用浅色系统外观，弹窗/选择器才与界面一致

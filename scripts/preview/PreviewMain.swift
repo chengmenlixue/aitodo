@@ -10,7 +10,27 @@ struct PreviewBoot {
             testMove()
             return
         }
+        if ProcessInfo.processInfo.environment["AITODO_TEST_PARSE"] == "1" {
+            testParse()
+            return
+        }
         MainActor.assumeIsolated { run() }
+    }
+
+    /// AI 解析：JSON 容错 + 象限映射 + 默认第四象限
+    static func testParse() {
+        let cases = AITaskParser.parseContent(#"{"tasks":[{"title":"A","important":true,"urgent":true},{"title":"B"},{"title":"C","important":false,"urgent":true}]}"#)
+        let q = cases.map(\.quadrant.rawValue)
+        print(q == [0, 3, 2] ? "PASS parse 象限映射与默认第四象限" : "FAIL parse \(q)")
+
+        let invalid = AITaskParser.parseContent("抱歉，我无法解析这张截图")
+        print(invalid.isEmpty ? "PASS parse 非JSON输出兜底" : "FAIL parse 非JSON输出")
+
+        let empty = AITaskParser.parseContent("{\"tasks\":[]}")
+        print(empty.isEmpty ? "PASS parse 空任务列表" : "FAIL parse 空任务列表")
+
+        let fenced = AITaskParser.parseContent("结果如下：\n```json\n{\"tasks\":[{\"title\":\"带代码围栏的任务\",\"important\":true,\"urgent\":false}]}\n```")
+        print(fenced.count == 1 && fenced[0].quadrant == .importantNotUrgent ? "PASS parse markdown围栏剥离" : "FAIL parse markdown围栏")
     }
 
     /// 拖拽排序/跨象限移动逻辑的确定性测试

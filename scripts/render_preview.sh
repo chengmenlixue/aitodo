@@ -23,6 +23,7 @@ mkdir -p build
     Sources/AiTodo/QuadrantViews.swift \
     Sources/AiTodo/TaskRow.swift \
     Sources/AiTodo/ArchiveView.swift \
+    Sources/AiTodo/AIProvider.swift \
     Sources/AiTodo/InkEffects.swift \
     Sources/AiTodo/SettingsView.swift
 
