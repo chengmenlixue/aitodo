@@ -170,11 +170,10 @@ final class SelectionCoordinator {
             let view = SelectionOverlayView(frame: NSRect(origin: .zero, size: screen.frame.size))
             view.onComplete = { [weak self] viewRect in
                 let displayID = screen.displayID
-                // 选区在显示器坐标系中的位置（顶部原点）
-                let sourceRect = CGRect(x: screen.frame.minX + viewRect.minX,
-                                        y: viewRect.minY,
-                                        width: viewRect.width,
-                                        height: viewRect.height)
+                // 关键：覆盖窗铺满该显示器，选区坐标即显示器本地坐标（顶部原点）。
+                // 不能叠加 screen.frame.minX 等全局偏移，否则拓展屏选区越界导致截图失败。
+                let bounds = CGRect(x: 0, y: 0, width: screen.frame.width, height: screen.frame.height)
+                let sourceRect = bounds.intersection(viewRect)
                 let pixelScale = screen.backingScaleFactor
                 self?.close()
                 Task { @MainActor in
