@@ -150,11 +150,28 @@ final class HotKeyCenter {
 
 // MARK: - 选区覆盖窗协调
 
+/// 覆盖窗：borderless 且允许成为 key（接收 Esc）
+final class OverlayWindow: NSWindow {
+    override var canBecomeKey: Bool { true }
+}
+
 final class SelectionCoordinator {
     private var windows: [NSWindow] = []
+    private var escMonitor: Any?
+    private var cancelHandler: (() -> Void)?
 
     func begin(onComplete: @escaping (Data?) -> Void) {
         close()
+        // Esc 取消：本地监听（覆盖窗被点击激活应用后生效）
+        escMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
+            guard event.keyCode == 53 else { return event }
+            self?.cancelHandler?()
+            return nil
+        }
+        cancelHandler = { [weak self] in
+            self?.close()
+            onComplete(nil)
+        }
         for screen in NSScreen.screens {
             let window = NSWindow(contentRect: screen.frame,
                                   styleMask: .borderless,
@@ -190,17 +207,21 @@ final class SelectionCoordinator {
                 }
             }
             view.onCancel = { [weak self] in
-                self?.close()
-                onComplete(nil)
+                self?.cancelHandler?()
             }
             window.contentView = view
-            window.makeKeyAndOrderFront(nil)
-            window.makeFirstResponder(view)
+            // orderFrontRegardless：不激活应用、不抢焦点，其他应用界面截图不跳动
+            window.orderFrontRegardless()
             windows.append(window)
         }
     }
 
     func close() {
+        if let monitor = escMonitor {
+            NSEvent.removeMonitor(monitor)
+            escMonitor = nil
+        }
+        cancelHandler = nil
         windows.forEach { $0.orderOut(nil) }
         windows.removeAll()
     }
