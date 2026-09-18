@@ -158,7 +158,8 @@ struct TaskRow: View {
                            accent: accent,
                            locked: locked,
                            onToggle: { store.toggleSubtask(id: task.id, subtaskID: sub.id) },
-                           onDelete: { store.deleteSubtask(id: task.id, subtaskID: sub.id) })
+                           onDelete: { store.deleteSubtask(id: task.id, subtaskID: sub.id) },
+                           onDragStarted: { store.beginDrag(id: sub.id) })
             }
 
             if !locked {
@@ -184,19 +185,28 @@ struct TaskRow: View {
         .padding(.bottom, 10)
     }
 
-    /// 子任务行：与主任务同色调但更轻更融合；悬停浮现同色墨润与删除
+    /// 子任务行：与主任务同色调但更轻更融合；悬停浮现把手、墨润与删除；可拖出成为主任务
     private struct SubtaskRow: View {
         let sub: Subtask
         let accent: Color
         let locked: Bool
         let onToggle: () -> Void
         let onDelete: () -> Void
+        let onDragStarted: () -> Void
 
+        @EnvironmentObject private var store: TaskStore
         @Environment(\.accessibilityReduceMotion) private var reduceMotion
         @State private var hovered = false
 
         var body: some View {
             HStack(spacing: 8) {
+                // 拖拽把手：悬停浮现，提示可拖出成为主任务
+                Image(systemName: "line.3.horizontal")
+                    .font(.system(size: 9, weight: .semibold))
+                    .foregroundColor(Theme.textTertiary.opacity(0.7))
+                    .frame(width: 12)
+                    .opacity(hovered && !locked && !sub.isDone ? 1 : 0)
+
                 // 勾选圈：视觉 14pt，命中区放大到 20pt，好点
                 Button(action: onToggle) {
                     ZStack {
@@ -244,6 +254,12 @@ struct TaskRow: View {
             )
             .contentShape(Rectangle())
             .onHover { hovered = $0 }
+            .opacity(store.draggingID == sub.id ? 0.4 : 1)
+            .onDrag {
+                // 拖出成为主任务：放置引擎会自动从子任务提升
+                onDragStarted()
+                return NSItemProvider(object: sub.id.uuidString as NSString)
+            }
             .animation(reduceMotion ? nil : Motion.micro, value: hovered)
         }
     }
