@@ -44,10 +44,17 @@ struct TaskRow: View {
                 .strokeBorder(accent.opacity(0.55), style: StrokeStyle(lineWidth: 1.2, dash: [5, 4]))
                 .opacity(isDragSource ? 1 : 0)
         )
-        .scaleEffect(isDragSource ? 0.98 : 1)
+        // 拖拽悬停中带：目标行虚线高亮（将成为子任务的落点提示）
+        .overlay(
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .strokeBorder(accent.opacity(0.7), style: StrokeStyle(lineWidth: 1.4, dash: [4, 3]))
+                .opacity(store.nestTargetID == task.id ? 1 : 0)
+        )
+        .scaleEffect(isDragSource ? 0.98 : (store.nestTargetID == task.id ? 1.01 : 1))
         .opacity(isDragSource ? 0.55 : 1)
         .contentShape(Rectangle())
         .animation(reduceMotion ? nil : Motion.softIn, value: isDragSource)
+        .animation(reduceMotion ? nil : Motion.softIn, value: store.nestTargetID == task.id)
         .animation(reduceMotion ? nil : Motion.softIn, value: task.isExpanded)
         .animation(reduceMotion ? nil : Motion.micro, value: hovered)
         .animation(reduceMotion ? nil : Motion.pop, value: task.isDone)
@@ -62,9 +69,9 @@ struct TaskRow: View {
         }
         .contextMenu { contextItems }
         .onDrop(of: [UTType.plainText], delegate: RowDropDelegate(
-            onEnter: dropHandlers?.onEnter ?? {},
-            onExit: dropHandlers?.onExit ?? {},
-            onDrop: dropHandlers?.onDrop ?? {}))
+            rowHeight: 48,
+            onZone: dropHandlers?.onZone ?? { _ in },
+            onDrop: dropHandlers?.onDrop ?? { _ in }))
         .popover(isPresented: $showsDuePopover) { duePopover }
     }
 

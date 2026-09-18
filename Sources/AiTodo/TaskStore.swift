@@ -1,11 +1,20 @@
 import Combine
 import Foundation
 
+/// 拖拽放置语义：排序插入 或 嵌套为子任务
+enum DropPlacement {
+    case reorderTo(quadrant: Quadrant, index: Int)
+    case nestInto(parentID: UUID)
+}
+
 final class TaskStore: ObservableObject {
     @Published private(set) var tasks: [TaskItem] = []
 
     // 拖拽会话状态：全局共享（跨卡片），beginDrag 时设置，落下时清除
     @Published var draggingID: UUID?
+    /// 实时腾位/嵌套的目标行（用于虚线高亮）
+    @Published var nestTargetID: UUID?
+    private var dragSnapshot: Data?
 
     private let fileURL: URL
     private var cancellables = Set<AnyCancellable>()
@@ -13,11 +22,82 @@ final class TaskStore: ObservableObject {
 
     func beginDrag(id: UUID) {
         DebugLog.write("beginDrag: \(id)")
+        dragSnapshot = try? JSONEncoder().encode(tasks)
         draggingID = id
     }
 
+    /// 拖拽取消（移出卡片未落下）：恢复拖拽开始时的快照
+    func cancelDrag() {
+        if let data = dragSnapshot,
+           let restored = try? JSONDecoder().decode([TaskItem].self, from: data) {
+            tasks = restored
+        }
+        endDrag()
+    }
+
     func endDrag() {
+        dragSnapshot = nil
         draggingID = nil
+        nestTargetID = nil
+    }
+
+    /// 把被拖任务从原位置（顶层或子任务）取出；从子任务取出时提升为普通任务
+    private func extractDragged(id: UUID) -> TaskItem? {
+        if let index = tasks.firstIndex(where: { $0.id == id }) {
+            guard !tasks[index].isArchived else { return nil }
+            return tasks.remove(at: index)
+        }
+        guard let parentIndex = tasks.firstIndex(where: { $0.subtasks.contains(where: { $0.id == id }) }),
+              let subIndex = tasks[parentIndex].subtasks.firstIndex(where: { $0.id == id }) else {
+            return nil
+        }
+        let sub = tasks[parentIndex].subtasks.remove(at: subIndex)
+        return TaskItem(id: sub.id, title: sub.title,
+                        quadrant: tasks[parentIndex].quadrant, isDone: sub.isDone)
+    }
+
+    private func placeTopLevel(_ item: inout TaskItem, quadrant: Quadrant, index: Int) {
+        item.quadrant = quadrant
+        item.isExpanded = false
+        let targetIDs = tasks.filter { !$0.isArchived && $0.quadrant == quadrant }.map(\.id)
+        let clamped = min(max(index, 0), targetIDs.count)
+        if clamped < targetIDs.count,
+           let anchorIndex = tasks.firstIndex(where: { $0.id == targetIDs[clamped] }) {
+            tasks.insert(item, at: anchorIndex)
+        } else if let lastIndex = targetIDs.last,
+                  let tailIndex = tasks.firstIndex(where: { $0.id == lastIndex }) {
+            tasks.insert(item, at: tailIndex + 1)
+        } else {
+            tasks.append(item)
+        }
+    }
+
+    private func placeNested(_ item: inout TaskItem, parentIndex: Int) {
+        item.quadrant = tasks[parentIndex].quadrant
+        item.dueDate = nil            // 子任务不保留独立提醒
+        item.isExpanded = false
+        ReminderCenter.cancel(id: item.id)
+        tasks[parentIndex].isExpanded = true
+        // 子任务保留 id（便于拖拽提升还原）、标题与完成态
+        tasks[parentIndex].subtasks.append(Subtask(id: item.id, title: item.title, isDone: item.isDone))
+    }
+
+    /// 拖拽放置：顶层排序，或嵌套为某主任务的子任务（自动展开父任务、随子任务提升）
+    func applyDropPlacement(id: UUID, placement: DropPlacement) {
+        guard var item = extractDragged(id: id) else { return }
+        switch placement {
+        case .reorderTo(let quadrant, let index):
+            placeTopLevel(&item, quadrant: quadrant, index: index)
+        case .nestInto(let parentID):
+            if let parentIndex = tasks.firstIndex(where: { $0.id == parentID }),
+               !tasks[parentIndex].isArchived, !tasks[parentIndex].isDone,
+               item.subtasks.isEmpty {
+                placeNested(&item, parentIndex: parentIndex)
+            } else {
+                // 目标不可嵌套（已完成/带子任务）时退化为追加到其象限末尾
+                placeTopLevel(&item, quadrant: item.quadrant, index: Int.max)
+            }
+        }
     }
 
     init(directory: URL? = nil, seedOnEmpty: Bool = true) {

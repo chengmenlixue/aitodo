@@ -1,6 +1,24 @@
 import SwiftUI
 import UniformTypeIdentifiers
 
+/// 行内落区分区：上带=排到前面，中带=成为子任务，下带=排到后面；out=离开行
+enum DropZone {
+    case above
+    case middle
+    case below
+    case out
+
+    init(y: CGFloat, rowHeight: CGFloat) {
+        if y < rowHeight * 0.25 {
+            self = .above
+        } else if y > rowHeight * 0.75 {
+            self = .below
+        } else {
+            self = .middle
+        }
+    }
+}
+
 struct QuadrantGrid: View {
     var body: some View {
         VStack(spacing: 18) {
@@ -49,6 +67,7 @@ struct QuadrantCard: View {
     private var skin: AppSkin { AppSkin.from(skinRaw) }
     private var items: [TaskItem] { store.tasks(in: quadrant) }
     private static let cardSpace = "quadrantCard"
+    private static let rowHeight: CGFloat = 48
 
     var body: some View {
         ZStack {
@@ -64,7 +83,7 @@ struct QuadrantCard: View {
             set: { hovering in withAnimation(Motion.softIn) { targeted = hovering } }
         )) { _ in
             // 空白处松手：追加到本象限末尾
-            appendDropped(at: inkPoint)
+            appendDropped()
             return store.draggingID != nil
         }
         .onAppear {
@@ -113,9 +132,8 @@ struct QuadrantCard: View {
                 isDragSource: store.draggingID == task.id,
                 onDragStarted: { store.beginDrag(id: task.id) },
                 dropHandlers: RowDropHandlers(
-                    onEnter: { rowEnter(task) },
-                    onExit: {},
-                    onDrop: { rowDrop(task) }))
+                    onZone: { zone in rowZone(task, zone) },
+                    onDrop: { zone in rowDrop(task, zone) }))
             .transition(.asymmetric(
                 insertion: .scale(scale: 0.9).combined(with: .opacity),
                 removal: .opacity))
@@ -217,14 +235,37 @@ struct QuadrantCard: View {
         }
     }
 
-    // MARK: - 拖拽：行级腾位 + 落位
+    // MARK: - 拖拽落区
 
-    /// 光标进入某行 → 把拖拽中的任务实时移动到该行之前（同象限排序 / 跨象限飞入）
-    private func rowEnter(_ target: TaskItem) {
-        DebugLog.write("rowEnter target=\(target.title.prefix(6)) draggingID=\(String(describing: store.draggingID))")
-        guard let dragID = store.draggingID, dragID != target.id else { return }
-        let targetIndex = items.firstIndex(where: { $0.id == target.id }) ?? items.count
-        store.move(id: dragID, to: quadrant, insertionIndex: targetIndex)
+    /// 光标进入行的不同落区 → 实时排序（上/下带）或嵌套为子任务（中带）
+    private func idx(_ task: TaskItem) -> Int {
+        items.firstIndex(where: { $0.id == task.id }) ?? items.count
+    }
+
+    private func rowZone(_ target: TaskItem, _ zone: DropZone) {
+        guard let dragID = store.draggingID, dragID != target.id, !target.isDone else {
+            return
+        }
+        // 带子任务的任务不能成为别人的子任务：中带落区退化为排序
+        let canNest = store.tasks.first(where: { $0.id == dragID })?.subtasks.isEmpty ?? false
+
+        switch zone {
+        case .above:
+            let index = idx(target)
+            store.applyDropPlacement(id: dragID, placement: .reorderTo(quadrant: quadrant, index: index))
+        case .middle:
+            if canNest {
+                store.applyDropPlacement(id: dragID, placement: .nestInto(parentID: target.id))
+            } else {
+                let index = idx(target) + 1
+                store.applyDropPlacement(id: dragID, placement: .reorderTo(quadrant: quadrant, index: index))
+            }
+        case .below:
+            let index = idx(target) + 1
+            store.applyDropPlacement(id: dragID, placement: .reorderTo(quadrant: quadrant, index: index))
+        case .out:
+            return
+        }
         withAnimation(Motion.softIn) {
             targeted = true
             if let rect = rowRect(target.id) {
@@ -233,31 +274,30 @@ struct QuadrantCard: View {
         }
     }
 
-    /// 在某行上松手：确保落进本象限并触发落位高亮
-    private func rowDrop(_ target: TaskItem) {
-        DebugLog.write("rowDrop target=\(target.title.prefix(6)) draggingID=\(String(describing: store.draggingID))")
-        guard let dragID = store.draggingID else { return }
+    /// 在某行落区上松手：按当前落区最终放置一次，并触发落位高亮
+    private func rowDrop(_ target: TaskItem, _ zone: DropZone) {
+        rowZone(target, zone)
         var crossed = false
-        if let index = store.tasks.firstIndex(where: { $0.id == dragID }),
+        if let dragID = store.draggingID,
+           let index = store.tasks.firstIndex(where: { $0.id == dragID }),
            store.tasks[index].quadrant != quadrant {
-            let targetIndex = items.firstIndex(where: { $0.id == target.id }) ?? items.count
-            store.move(id: dragID, to: quadrant, insertionIndex: targetIndex)
             crossed = true
         }
-        let near = rowRect(target.id).map { CGPoint(x: $0.midX, y: $0.midY) } ?? inkPoint
-        finishDrop(crossed: crossed, near: near, landedRect: rowRect(target.id))
+        let rect = rowRect(store.draggingID ?? target.id) ?? rowRect(target.id)
+        finishDrop(crossed: crossed, near: rect.map { CGPoint(x: $0.midX, y: $0.midY) } ?? inkPoint,
+                   landedRect: rect)
     }
 
     /// 空白处松手：追加到本象限末尾
-    private func appendDropped(at point: CGPoint) {
+    private func appendDropped() {
         guard let dragID = store.draggingID else { return }
         var crossed = false
         if let index = store.tasks.firstIndex(where: { $0.id == dragID }),
            store.tasks[index].quadrant != quadrant {
-            store.move(id: dragID, to: quadrant)
+            store.applyDropPlacement(id: dragID, placement: .reorderTo(quadrant: quadrant, index: .max))
             crossed = true
         }
-        var near = point
+        var near = inkPoint
         if let last = items.last, let rect = rowRect(last.id) {
             near = CGPoint(x: rect.midX, y: rect.maxY + 10)
         }
@@ -284,38 +324,44 @@ struct QuadrantCard: View {
     }
 }
 
-/// 行级落点代理：光标进入行即回调（比卡片级 dropUpdated 可靠）
+/// 行级落点代理：进入/移动/离开/落下时回报落区
 struct RowDropDelegate: DropDelegate {
-    let onEnter: () -> Void
-    let onExit: () -> Void
-    let onDrop: () -> Void
+    let onZone: (DropZone) -> Void
+    let onDrop: (DropZone) -> Void
+    private let rowHeight: CGFloat
+
+    init(rowHeight: CGFloat, onZone: @escaping (DropZone) -> Void, onDrop: @escaping (DropZone) -> Void) {
+        self.rowHeight = rowHeight
+        self.onZone = onZone
+        self.onDrop = onDrop
+    }
 
     func dropEntered(info: DropInfo) {
-        DebugLog.write("row dropEntered")
-        onEnter()
+        DebugLog.write("row dropEntered y=\\(info.location.y)")
+        onZone(DropZone(y: info.location.y, rowHeight: rowHeight))
     }
 
     func dropUpdated(info: DropInfo) -> DropOperation? {
-        .move
+        onZone(DropZone(y: info.location.y, rowHeight: rowHeight))
+        return .move
     }
 
     func dropExited(info: DropInfo) {
         DebugLog.write("row dropExited")
-        onExit()
+        onZone(.out)
     }
 
     func performDrop(info: DropInfo) -> Bool {
-        DebugLog.write("row performDrop")
+        DebugLog.write("row performDrop y=\\(info.location.y)")
         guard !info.itemProviders(for: [.plainText]).isEmpty else { return false }
-        onDrop()
+        onDrop(DropZone(y: info.location.y, rowHeight: rowHeight))
         return true
     }
 }
 
 struct RowDropHandlers {
-    let onEnter: () -> Void
-    let onExit: () -> Void
-    let onDrop: () -> Void
+    let onZone: (DropZone) -> Void
+    let onDrop: (DropZone) -> Void
 }
 
 struct LandedPulse: Identifiable {

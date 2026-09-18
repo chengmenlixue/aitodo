@@ -138,6 +138,9 @@ struct ParsedTask: Identifiable {
     var title: String
     var quadrant: Quadrant
     var selected = true
+    /// 非空 = 该条将作为所选主任务的子任务添加
+    var parentID: UUID?
+    var parentTitle: String?
 }
 
 // MARK: - 错误

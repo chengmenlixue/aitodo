@@ -44,6 +44,43 @@ struct AIResultPanel: View {
         .frame(width: 500)
     }
 
+    /// 可选主任务（未完成、未归档的顶层任务）
+    private var parentCandidates: [TaskItem] {
+        store.tasks.filter { !$0.isArchived && !$0.isDone }
+    }
+
+    private func parentAttachMenu(_ task: Binding<ParsedTask>) -> some View {
+        Menu {
+            Section("作为子任务添加到") {
+                ForEach(parentCandidates) { parent in
+                    Button("\(parent.quadrant.title) · \(String(parent.title.prefix(16)))") {
+                        task.wrappedValue.parentID = parent.id
+                        task.wrappedValue.parentTitle = parent.title
+                    }
+                    .disabled(parent.id == task.wrappedValue.parentID)
+                }
+                if task.wrappedValue.parentID != nil {
+                    Divider()
+                    Button("取消，按象限添加") {
+                        task.wrappedValue.parentID = nil
+                        task.wrappedValue.parentTitle = nil
+                    }
+                }
+            }
+        } label: {
+            HStack(spacing: 4) {
+                Image(systemName: "rectangle.stack.badge.plus")
+                Text(task.wrappedValue.parentTitle.map { "→ \(String($0.prefix(10)))" } ?? "子任务")
+            }
+            .font(.system(size: 10))
+            .foregroundColor(task.wrappedValue.parentID != nil ? task.quadrant.wrappedValue.accent : Theme.textSecondary)
+        }
+        .menuStyle(.borderlessButton)
+        .menuIndicator(.hidden)
+        .fixedSize()
+        .help("选择主任务后，该条将作为其子任务添加")
+    }
+
     private func resultRow(_ task: Binding<ParsedTask>) -> some View {
         HStack(spacing: 10) {
             Button {
@@ -78,6 +115,10 @@ struct AIResultPanel: View {
             .menuStyle(.borderlessButton)
             .menuIndicator(.hidden)
             .fixedSize()
+            .opacity(task.parentID == nil ? 1 : 0.3)
+            .disabled(task.parentID != nil)
+
+            parentAttachMenu(task)
         }
         .padding(.horizontal, 10)
         .padding(.vertical, 6)
@@ -89,7 +130,11 @@ struct AIResultPanel: View {
 
     private func addSelected() {
         for task in manager.resultTasks where task.selected {
-            store.add(title: task.title, quadrant: task.quadrant)
+            if let parentID = task.parentID {
+                store.addSubtask(id: parentID, title: task.title)
+            } else {
+                store.add(title: task.title, quadrant: task.quadrant)
+            }
         }
         manager.dismissResults()
     }
