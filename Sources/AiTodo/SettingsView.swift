@@ -124,6 +124,17 @@ struct SettingsView: View {
                     .font(.system(size: 11))
                     .foregroundColor(Theme.textSecondary)
             }
+            Text(hotkeyStatusText)
+                .font(.system(size: 10))
+                .foregroundColor(ScreenshotManager.shared.hotkeyRegistered ? Theme.textTertiary : Theme.overdue)
+
+            HStack {
+                Button("立即截图测试（不经快捷键）") { ScreenshotManager.shared.trigger() }
+                    .buttonStyle(.plain)
+                    .font(.system(size: 12))
+                    .foregroundColor(Theme.textSecondary)
+                Spacer()
+            }
 
             HStack {
                 Button("测试连接") { testConnection() }
@@ -185,6 +196,14 @@ struct SettingsView: View {
         if mods & 1 << 18 != 0 { text += "⌃" }
         if mods & 1 << 17 != 0 { text += "⇧" }
         return text + key
+    }
+
+    private var hotkeyStatusText: String {
+        let status = ScreenshotManager.shared.hotkeyRegisterStatus
+        if ScreenshotManager.shared.hotkeyRegistered {
+            return "✅ 系统级快捷键已注册，任意界面按下即触发"
+        }
+        return "❌ 快捷键注册失败（错误码 \(status)），该组合键可能已被其他软件占用，请更改后重试"
     }
 
     private func toggleHotkeyRecording() {

@@ -26,16 +26,30 @@ final class ScreenshotManager: ObservableObject {
     private let selection = SelectionCoordinator()
     private var hotKeyRef: EventHotKeyRef?
     private var eventHandler: EventHandlerRef?
+    private(set) var hotkeyRegisterStatus: OSStatus = noErr
 
     // MARK: - 快捷键
 
     func registerHotkey() {
         let defaults = UserDefaults.standard
         let code = (defaults.object(forKey: "shotKeyCode") as? Int) ?? 1            // kVK_ANSI_S
-        let mods = (defaults.object(forKey: "shotModifiers") as? Int) ?? 2304      // ⌘⌥
-        HotKeyCenter.shared.register(keyCode: UInt32(code), modifiers: UInt32(mods)) { [weak self] in
+        let nsMods = (defaults.object(forKey: "shotModifiers") as? Int) ?? 1572864 // ⌘⌥（NSEvent 格式）
+        hotkeyRegisterStatus = HotKeyCenter.shared.register(keyCode: UInt32(code),
+                                                            modifiers: carbonModifiers(fromNS: nsMods)) { [weak self] in
             DispatchQueue.main.async { self?.trigger() }
         }
+    }
+
+    var hotkeyRegistered: Bool { hotkeyRegisterStatus == noErr }
+
+    /// NSEvent.ModifierFlags.rawValue → Carbon 修饰键掩码（RegisterEventHotKey 使用）
+    private func carbonModifiers(fromNS nsRaw: Int) -> UInt32 {
+        var carbon: UInt32 = 0
+        if nsRaw & 1 << 20 != 0 { carbon |= UInt32(cmdKey) }       // ⌘  256
+        if nsRaw & 1 << 19 != 0 { carbon |= UInt32(optionKey) }    // ⌥ 2048
+        if nsRaw & 1 << 18 != 0 { carbon |= UInt32(controlKey) }   // ⌃ 4096
+        if nsRaw & 1 << 17 != 0 { carbon |= UInt32(shiftKey) }     // ⇧  512
+        return carbon
     }
 
     func reapplyHotkey() {
@@ -45,6 +59,7 @@ final class ScreenshotManager: ObservableObject {
     // MARK: - 主流程
 
     func trigger() {
+        DebugLog.write("trigger 进入：phase=\(phase) screenCapturePermission=\(CGPreflightScreenCaptureAccess())")
         guard phase == .idle else { return }
         guard CGPreflightScreenCaptureAccess() else {
             CGRequestScreenCaptureAccess()
@@ -100,7 +115,8 @@ final class HotKeyCenter {
     private var eventHandler: EventHandlerRef?
     private var handler: (() -> Void)?
 
-    func register(keyCode: UInt32, modifiers: UInt32, handler: @escaping () -> Void) {
+    @discardableResult
+    func register(keyCode: UInt32, modifiers: UInt32, handler: @escaping () -> Void) -> OSStatus {
         unregister()
         self.handler = handler
 
@@ -114,8 +130,10 @@ final class HotKeyCenter {
             return noErr
         }, 1, &eventType, Unmanaged.passUnretained(self).toOpaque(), &eventHandler)
 
-        RegisterEventHotKey(keyCode, modifiers, hotKeyID,
-                            GetApplicationEventTarget(), 0, &hotKeyRef)
+        let status = RegisterEventHotKey(keyCode, modifiers, hotKeyID,
+                                         GetApplicationEventTarget(), 0, &hotKeyRef)
+        DebugLog.write("RegisterEventHotKey(\(keyCode), mods=\(modifiers)) → \(status)")
+        return status
     }
 
     func unregister() {
