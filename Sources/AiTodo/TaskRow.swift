@@ -145,47 +145,13 @@ struct TaskRow: View {
     // MARK: - 子任务区
 
     @ViewBuilder private var subtaskArea: some View {
-        VStack(alignment: .leading, spacing: 6) {
+        VStack(alignment: .leading, spacing: 4) {
             ForEach(task.subtasks) { sub in
-                HStack(spacing: 8) {
-                    Button {
-                        store.toggleSubtask(id: task.id, subtaskID: sub.id)
-                    } label: {
-                        ZStack {
-                            if sub.isDone {
-                                Circle().fill(accent.opacity(0.85))
-                                Image(systemName: "checkmark")
-                                    .font(.system(size: 7, weight: .bold))
-                                    .foregroundColor(.white)
-                            } else {
-                                Circle().strokeBorder(Theme.checkBoxRing, lineWidth: 1.2)
-                            }
-                        }
-                        .frame(width: 14, height: 14)
-                    }
-                    .buttonStyle(.plain)
-                    .disabled(locked)
-
-                    Text(sub.title)
-                        .font(.system(size: 12))
-                        .foregroundColor(sub.isDone ? Theme.textTertiary : Theme.textPrimary)
-                        .strikethrough(sub.isDone, color: Theme.textTertiary)
-                        .lineLimit(1)
-
-                    Spacer(minLength: 0)
-
-                    if !locked {
-                        Button {
-                            store.deleteSubtask(id: task.id, subtaskID: sub.id)
-                        } label: {
-                            Image(systemName: "xmark")
-                                .font(.system(size: 8, weight: .semibold))
-                                .foregroundColor(Theme.textTertiary)
-                        }
-                        .buttonStyle(.plain)
-                        .help("删除子任务")
-                    }
-                }
+                SubtaskRow(sub: sub,
+                           accent: accent,
+                           locked: locked,
+                           onToggle: { store.toggleSubtask(id: task.id, subtaskID: sub.id) },
+                           onDelete: { store.deleteSubtask(id: task.id, subtaskID: sub.id) })
             }
 
             if !locked {
@@ -193,6 +159,7 @@ struct TaskRow: View {
                     Image(systemName: "plus")
                         .font(.system(size: 9, weight: .semibold))
                         .foregroundColor(Theme.textTertiary)
+                        .frame(width: 20, height: 20)
                     TextField("添加子任务，回车确认", text: $newSubtaskTitle)
                         .textFieldStyle(.plain)
                         .font(.system(size: 12))
@@ -201,11 +168,77 @@ struct TaskRow: View {
                             newSubtaskTitle = ""
                         }
                 }
+                .padding(.leading, 8)
+                .padding(.bottom, 2)
             }
         }
-        .padding(.leading, 44)
-        .padding(.trailing, 12)
+        .padding(.leading, 34)
+        .padding(.trailing, 10)
         .padding(.bottom, 10)
+    }
+
+    /// 子任务行：与主任务同色调但更轻更融合；悬停浮现同色墨润与删除
+    private struct SubtaskRow: View {
+        let sub: Subtask
+        let accent: Color
+        let locked: Bool
+        let onToggle: () -> Void
+        let onDelete: () -> Void
+
+        @Environment(\.accessibilityReduceMotion) private var reduceMotion
+        @State private var hovered = false
+
+        var body: some View {
+            HStack(spacing: 8) {
+                // 勾选圈：视觉 14pt，命中区放大到 20pt，好点
+                Button(action: onToggle) {
+                    ZStack {
+                        if sub.isDone {
+                            Circle().fill(accent.opacity(0.75))
+                            Image(systemName: "checkmark")
+                                .font(.system(size: 7, weight: .bold))
+                                .foregroundColor(.white)
+                        } else {
+                            Circle().strokeBorder(accent.opacity(hovered ? 0.9 : 0.5), lineWidth: 1.3)
+                        }
+                    }
+                    .frame(width: 14, height: 14)
+                    .frame(width: 20, height: 20)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .disabled(locked)
+
+                Text(sub.title)
+                    .font(.system(size: 12))
+                    .foregroundColor(sub.isDone ? Theme.textTertiary : Theme.textPrimary)
+                    .strikethrough(sub.isDone, color: Theme.textTertiary)
+                    .lineLimit(1)
+
+                Spacer(minLength: 0)
+
+                Button(action: onDelete) {
+                    Image(systemName: "xmark")
+                        .font(.system(size: 8, weight: .semibold))
+                        .foregroundColor(Theme.textTertiary)
+                        .frame(width: 18, height: 18)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .disabled(locked)
+                .opacity(hovered && !sub.isDone ? 1 : 0)
+            }
+            .padding(.horizontal, 8)
+            .padding(.vertical, 4)
+            // 同色调墨润：悬停时浮现柔和的象限色底
+            .background(
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .fill(accent.opacity(hovered && !sub.isDone ? 0.14 : 0.0))
+            )
+            .contentShape(Rectangle())
+            .onHover { hovered = $0 }
+            .animation(reduceMotion ? nil : Motion.micro, value: hovered)
+        }
     }
 
     // MARK: - 控件
