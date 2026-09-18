@@ -94,6 +94,12 @@ final class TaskStore: ObservableObject {
         move(id: id, to: quadrant, insertionIndex: nil)
     }
 
+    /// 展开状态（仅视图记忆，不属于内容修改）
+    func setExpanded(id: UUID, to value: Bool) {
+        guard let index = tasks.firstIndex(where: { $0.id == id }) else { return }
+        tasks[index].isExpanded = value
+    }
+
     /// 拖拽排序 / 跨象限移动：insertionIndex 为目标象限展示列表中的插入位置（nil = 追加到末尾）
     func move(id: UUID, to quadrant: Quadrant, insertionIndex: Int?) {
         guard let fromIndex = tasks.firstIndex(where: { $0.id == id }),
@@ -117,12 +123,14 @@ final class TaskStore: ObservableObject {
     func rename(id: UUID, to title: String) {
         let trimmed = title.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty,
-              let index = tasks.firstIndex(where: { $0.id == id }) else { return }
+              let index = tasks.firstIndex(where: { $0.id == id }),
+              !tasks[index].isDone else { return }
         tasks[index].title = trimmed
     }
 
     func setDue(id: UUID, due: Date?) {
-        guard let index = tasks.firstIndex(where: { $0.id == id }) else { return }
+        guard let index = tasks.firstIndex(where: { $0.id == id }),
+              !tasks[index].isDone else { return }
         tasks[index].dueDate = due
         if tasks[index].isDone || due == nil {
             ReminderCenter.cancel(id: id)
@@ -136,6 +144,29 @@ final class TaskStore: ObservableObject {
             ReminderCenter.cancel(id: task.id)
         }
         tasks.removeAll { $0.isDone && !$0.isArchived }
+    }
+
+    // MARK: - 子任务（父任务完成后锁定，不可修改）
+
+    func addSubtask(id: UUID, title: String) {
+        let trimmed = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty,
+              let index = tasks.firstIndex(where: { $0.id == id }),
+              !tasks[index].isDone else { return }
+        tasks[index].subtasks.append(Subtask(title: trimmed))
+    }
+
+    func toggleSubtask(id: UUID, subtaskID: UUID) {
+        guard let index = tasks.firstIndex(where: { $0.id == id }),
+              !tasks[index].isDone,
+              let subIndex = tasks[index].subtasks.firstIndex(where: { $0.id == subtaskID }) else { return }
+        tasks[index].subtasks[subIndex].isDone.toggle()
+    }
+
+    func deleteSubtask(id: UUID, subtaskID: UUID) {
+        guard let index = tasks.firstIndex(where: { $0.id == id }),
+              !tasks[index].isDone else { return }
+        tasks[index].subtasks.removeAll { $0.id == subtaskID }
     }
 
     // MARK: - 归档

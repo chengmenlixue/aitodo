@@ -50,6 +50,19 @@ enum Quadrant: Int, CaseIterable, Codable, Identifiable {
     var accent: Color { Color(hex: accentHex) }
 }
 
+/// 子待办
+struct Subtask: Identifiable, Codable, Equatable {
+    let id: UUID
+    var title: String
+    var isDone: Bool
+
+    init(id: UUID = UUID(), title: String, isDone: Bool = false) {
+        self.id = id
+        self.title = title
+        self.isDone = isDone
+    }
+}
+
 struct TaskItem: Identifiable, Equatable {
     var id = UUID()
     var title: String
@@ -60,6 +73,8 @@ struct TaskItem: Identifiable, Equatable {
     var completedAt: Date?
     var isArchived = false
     var archivedAt: Date?
+    var subtasks: [Subtask] = []
+    var isExpanded = false
 
     init(id: UUID = UUID(),
          title: String,
@@ -86,7 +101,7 @@ struct TaskItem: Identifiable, Equatable {
 extension TaskItem: Codable {
     enum CodingKeys: String, CodingKey {
         case id, title, quadrant, isDone, createdAt, dueDate
-        case completedAt, isArchived, archivedAt
+        case completedAt, isArchived, archivedAt, subtasks, isExpanded
     }
 
     init(from decoder: Decoder) throws {
@@ -100,5 +115,7 @@ extension TaskItem: Codable {
         completedAt = try container.decodeIfPresent(Date.self, forKey: .completedAt)
         isArchived = try container.decodeIfPresent(Bool.self, forKey: .isArchived) ?? false
         archivedAt = try container.decodeIfPresent(Date.self, forKey: .archivedAt)
+        subtasks = try container.decodeIfPresent([Subtask].self, forKey: .subtasks) ?? []
+        isExpanded = try container.decodeIfPresent(Bool.self, forKey: .isExpanded) ?? false
     }
 }

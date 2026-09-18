@@ -78,6 +78,16 @@ enum AISettings {
         baseURL = kind.defaultBaseURL
         model = kind.defaultModel
     }
+
+    /// 识别提示词（设置中可编辑；空则用默认）
+    static var prompt: String {
+        get {
+            let saved = UserDefaults.standard.string(forKey: "aiPrompt") ?? ""
+            let trimmed = saved.trimmingCharacters(in: .whitespacesAndNewlines)
+            return trimmed.isEmpty ? AITaskParser.defaultPrompt : saved
+        }
+        set { UserDefaults.standard.set(newValue, forKey: "aiPrompt") }
+    }
 }
 
 // MARK: - Keychain
@@ -140,12 +150,13 @@ struct AIError: LocalizedError {
 // MARK: - AI 解析器
 
 enum AITaskParser {
-    static let systemPrompt = """
+    static let defaultPrompt = """
     你是待办任务解析助手。用户会提供一张屏幕截图，请从中识别出所有待办任务（TODO、日程、会议、需要完成的工作、别人交代的事项等）。
     只输出 JSON，不要输出任何其他文字，格式：
     {"tasks":[{"title":"简洁的中文任务标题，不超过30字","important":true,"urgent":false}]}
     important 表示是否重要，urgent 表示是否紧急，无法判断时填 false。截图中没有待办任务时输出 {"tasks":[]}
     """
+
 
     /// 调用视觉模型解析截图
     static func parseTasks(imagePNG data: Data) async throws -> [ParsedTask] {
@@ -204,7 +215,7 @@ enum AITaskParser {
             "model": AISettings.model,
             "temperature": 0.2,
             "messages": [
-                ["role": "system", "content": systemPrompt],
+                ["role": "system", "content": AISettings.prompt],
                 ["role": "user", "content": [
                     ["type": "image_url", "image_url": ["url": "data:image/png;base64,\(b64)"]],
                     ["type": "text", "text": userText]

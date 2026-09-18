@@ -134,7 +134,6 @@ struct RootView: View {
 struct HeaderControls: View {
     @Binding var page: Page
     @Binding var viewMode: ViewMode
-    @State private var showSettings = false
 
     var body: some View {
         HStack(spacing: 12) {
@@ -161,7 +160,7 @@ struct HeaderControls: View {
             .background(ChromeBackground(cornerRadius: 15))
 
             Button {
-                showSettings = true
+                SettingsWindowController.shared.show()
             } label: {
                 Image(systemName: "gearshape")
                     .font(.system(size: 13, weight: .medium))
@@ -171,7 +170,6 @@ struct HeaderControls: View {
                     .contentShape(Circle())
             }
             .buttonStyle(.plain)
-            .popover(isPresented: $showSettings) { SettingsView() }
             .help("设置")
         }
     }
