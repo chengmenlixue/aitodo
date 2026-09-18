@@ -151,10 +151,15 @@ struct ArchiveView: View {
 /// 归档条目：左侧色条标识来源象限，可恢复或删除
 struct ArchiveRow: View {
     @EnvironmentObject private var store: TaskStore
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @AppStorage("skin") private var skinRaw = AppSkin.classic.rawValue
     let task: TaskItem
 
+    @State private var expanded = false
+
     private var skin: AppSkin { AppSkin.from(skinRaw) }
+    private var hasSubtasks: Bool { !task.subtasks.isEmpty }
+    private var doneCount: Int { task.subtasks.filter(\.isDone).count }
 
     private static let timeFormatter: DateFormatter = {
         let formatter = DateFormatter()
@@ -167,6 +172,9 @@ struct ArchiveRow: View {
         if let archivedAt = task.archivedAt {
             parts.append(Self.timeFormatter.string(from: archivedAt) + " 归档")
         }
+        if hasSubtasks {
+            parts.append("子任务 \(doneCount)/\(task.subtasks.count)")
+        }
         if task.isDone {
             parts.append("已完成")
         }
@@ -174,10 +182,38 @@ struct ArchiveRow: View {
     }
 
     var body: some View {
-        HStack(spacing: 12) {
+        VStack(alignment: .leading, spacing: 0) {
+            header
+
+            if expanded && hasSubtasks {
+                subtaskList
+                    .transition(.opacity.combined(with: .move(edge: .top)))
+            }
+        }
+        .background(rowBackground)
+        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .contentShape(Rectangle())
+        .animation(reduceMotion ? nil : Motion.softIn, value: expanded)
+        .onTapGesture {
+            if hasSubtasks {
+                withAnimation(Motion.softIn) { expanded.toggle() }
+            }
+        }
+    }
+
+    private var header: some View {
+        HStack(spacing: 10) {
+            if hasSubtasks {
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 9, weight: .semibold))
+                    .rotationEffect(.degrees(expanded ? 90 : 0))
+                    .foregroundColor(Theme.textTertiary)
+                    .frame(width: 12)
+            }
+
             VStack(alignment: .leading, spacing: 3) {
                 Text(task.title)
-                    .font(.system(size: 14))
+                    .font(.system(size: 13))
                     .foregroundColor(task.isDone ? Theme.textTertiary : Theme.textPrimary)
                     .strikethrough(task.isDone, color: Theme.textTertiary)
                     .lineLimit(1)
@@ -185,12 +221,30 @@ struct ArchiveRow: View {
                     .font(.system(size: 11))
                     .foregroundColor(Theme.textTertiary)
             }
+
             Spacer(minLength: 8)
+
             if task.isDone {
                 Image(systemName: "checkmark.circle.fill")
                     .font(.system(size: 13))
                     .foregroundColor(task.quadrant.accent.opacity(0.8))
             }
+
+            if hasSubtasks {
+                Button {
+                    withAnimation(Motion.softIn) { expanded.toggle() }
+                } label: {
+                    Text("\(doneCount)/\(task.subtasks.count)")
+                        .font(.system(size: 10, weight: .medium))
+                        .foregroundColor(task.quadrant.accent)
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 2)
+                        .background(Capsule().fill(task.quadrant.accent.opacity(0.12)))
+                }
+                .buttonStyle(.plain)
+                .help("展开子任务")
+            }
+
             Button {
                 store.unarchive(id: task.id)
             } label: {
@@ -210,42 +264,42 @@ struct ArchiveRow: View {
                     .font(.system(size: 10, weight: .semibold))
                     .foregroundColor(Theme.textTertiary)
                     .frame(width: 24, height: 24)
-                    .background(Circle().fill(Theme.controlCircle))
+                    .background(Circle().fill(Color.white.opacity(0.07)))
             }
             .buttonStyle(.plain)
             .help("永久删除")
         }
         .padding(.leading, 16)
         .padding(.trailing, 10)
-        .frame(height: 52)
-        .frame(maxWidth: .infinity)
-        .background(rowBackground)
-        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
-        .contentShape(Rectangle())
-        .contextMenu {
-            Button("恢复到原象限") { store.unarchive(id: task.id) }
-            Divider()
-            Button("永久删除", role: .destructive) { store.delete(id: task.id) }
+        .frame(minHeight: 48)
+    }
+
+    /// 归档中的子任务（只读展示完成状态）
+    private var subtaskList: some View {
+        VStack(alignment: .leading, spacing: 5) {
+            ForEach(task.subtasks) { sub in
+                HStack(spacing: 6) {
+                    Image(systemName: sub.isDone ? "checkmark.circle.fill" : "circle")
+                        .font(.system(size: 9))
+                        .foregroundColor(sub.isDone ? task.quadrant.accent : Theme.textTertiary)
+                    Text(sub.title)
+                        .font(.system(size: 11))
+                        .foregroundColor(sub.isDone ? Theme.textTertiary : Theme.textSecondary)
+                        .strikethrough(sub.isDone, color: Theme.textTertiary)
+                }
+            }
         }
+        .padding(.leading, 28)
+        .padding(.bottom, 10)
     }
 
     private var rowBackground: some View {
         let glass = skin == .glass
-        let base = RoundedRectangle(cornerRadius: 14, style: .continuous)
-        let wash = LinearGradient(
-            stops: [
-                .init(color: task.quadrant.accent.opacity(task.isDone ? 0.18 : 0.36), location: 0),
-                .init(color: task.quadrant.accent.opacity(0.06), location: 0.55),
-                .init(color: task.quadrant.accent.opacity(0), location: 1.0),
-            ],
-            startPoint: .leading,
-            endPoint: .trailing
-        )
         return Group {
             if glass {
-                base.fill(.thinMaterial).overlay(base.fill(wash))
+                RoundedRectangle(cornerRadius: 14, style: .continuous).fill(.thinMaterial)
             } else {
-                base.fill(Theme.rowBackground).overlay(base.fill(wash))
+                RoundedRectangle(cornerRadius: 14, style: .continuous).fill(Theme.rowBackground)
             }
         }
     }
