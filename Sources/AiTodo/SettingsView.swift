@@ -37,7 +37,7 @@ struct SettingsView: View {
                     SettingsCard(icon: "gearshape.fill", title: "通用") {
                         generalSection
                     }
-                    Text("待办 AiTodo v1.4.0 · 数据保存在本机")
+                    Text("待办 AiTodo v1.4.1 · 数据保存在本机")
                         .font(.system(size: 10))
                         .foregroundColor(Theme.textTertiary)
                         .frame(maxWidth: .infinity, alignment: .center)

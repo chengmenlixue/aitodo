@@ -5,6 +5,14 @@ cd "$(dirname "$0")/.."
 
 SDK="$(xcrun --show-sdk-path 2>/dev/null || echo "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk")"
 
+# 架构：ARCH=arm64（默认，Apple Silicon）| ARCH=intel（x86_64 交叉编译，Intel 芯片）
+ARCH="${ARCH:-arm64}"
+TARGET_ARGS=()
+if [ "$ARCH" = "intel" ]; then
+    TARGET_ARGS=(-target x86_64-apple-macos13.0)
+    echo ">> 目标架构：Intel (x86_64)"
+fi
+
 # 优先使用随项目解压的官方工具链（规避本机 CLT modulemap 损坏问题）
 SWIFTC=(swiftc)
 if [ -x "build/toolchain/usr/bin/swiftc" ]; then
@@ -17,6 +25,7 @@ fi
 
 echo ">> 编译：${SWIFTC[*]}"
 "${SWIFTC[@]}" -O -parse-as-library \
+    "${TARGET_ARGS[@]}" \
     -sdk "$SDK" \
     -o build/AiTodo \
     Sources/AiTodo/*.swift
@@ -39,7 +48,7 @@ cat > "$APP/Contents/Info.plist" <<'PLIST'
     <key>CFBundleName</key><string>待办</string>
     <key>CFBundleDisplayName</key><string>待办</string>
     <key>CFBundlePackageType</key><string>APPL</string>
-    <key>CFBundleShortVersionString</key><string>1.4.0</string>
+    <key>CFBundleShortVersionString</key><string>1.4.1</string>
     <key>CFBundleVersion</key><string>1</string>
     <key>CFBundleIconFile</key><string>AppIcon</string>
     <key>LSMinimumSystemVersion</key><string>13.0</string>
