@@ -24,11 +24,18 @@ if [ -x "build/toolchain/usr/bin/swiftc" ]; then
 fi
 
 echo ">> 编译：${SWIFTC[*]}"
-"${SWIFTC[@]}" -O -parse-as-library \
-    "${TARGET_ARGS[@]}" \
-    -sdk "$SDK" \
-    -o build/AiTodo \
-    Sources/AiTodo/*.swift
+if [ "$ARCH" = "intel" ]; then
+    "${SWIFTC[@]}" -O -parse-as-library \
+        -target x86_64-apple-macos13.0 \
+        -sdk "$SDK" \
+        -o build/AiTodo \
+        Sources/AiTodo/*.swift
+else
+    "${SWIFTC[@]}" -O -parse-as-library \
+        -sdk "$SDK" \
+        -o build/AiTodo \
+        Sources/AiTodo/*.swift
+fi
 
 APP="build/AiTodo.app"
 rm -rf "$APP"

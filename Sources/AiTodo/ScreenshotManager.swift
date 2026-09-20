@@ -228,10 +228,19 @@ final class SelectionCoordinator {
 
 }
 
-// MARK: - 屏幕截图（ScreenCaptureKit）
+// MARK: - 屏幕截图（ScreenCaptureKit，macOS 13 回退 CGDisplayCreateImage）
 
 enum CaptureDisplay {
     static func image(displayID: CGDirectDisplayID, sourceRect: CGRect, pixelScale: CGFloat) async throws -> CGImage {
+        if #available(macOS 14.0, *) {
+            return try await screenCaptureKitImage(displayID: displayID, sourceRect: sourceRect, pixelScale: pixelScale)
+        }
+        // macOS 13（Intel 包）：ScreenCaptureKit 截图 API 不可用
+        return try legacyDisplayImage(displayID: displayID, sourceRect: sourceRect)
+    }
+
+    @available(macOS 14.0, *)
+    private static func screenCaptureKitImage(displayID: CGDirectDisplayID, sourceRect: CGRect, pixelScale: CGFloat) async throws -> CGImage {
         let content = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true)
         guard let display = content.displays.first(where: { $0.displayID == displayID }) else {
             throw AIError(message: "未找到目标显示器")
@@ -245,6 +254,22 @@ enum CaptureDisplay {
         config.captureResolution = .best
         config.queueDepth = 1
         return try await SCScreenshotManager.captureImage(contentFilter: filter, configuration: config)
+    }
+
+    /// 选区坐标为显示器本地坐标（顶部原点），整屏截取后按像素密度裁剪
+    private static func legacyDisplayImage(displayID: CGDirectDisplayID, sourceRect: CGRect) throws -> CGImage {
+        guard let full = CGDisplayCreateImage(displayID) else {
+            throw AIError(message: "未找到目标显示器")
+        }
+        let scale = CGFloat(full.width) / CGDisplayBounds(displayID).width   // 实际像素密度（1x/2x）
+        let cropRect = CGRect(x: sourceRect.minX * scale,
+                              y: sourceRect.minY * scale,
+                              width: sourceRect.width * scale,
+                              height: sourceRect.height * scale)
+        guard let cropped = full.cropping(to: cropRect) else {
+            throw AIError(message: "屏幕选区裁剪失败")
+        }
+        return cropped
     }
 }
 
