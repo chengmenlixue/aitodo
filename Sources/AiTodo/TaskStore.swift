@@ -128,6 +128,15 @@ final class TaskStore: ObservableObject {
     var completedCount: Int { activeTasks.count - remainingCount }
     var totalCount: Int { activeTasks.count }
 
+    /// 各象限未完成数，索引对应 Quadrant.rawValue（悬浮球/菜单栏徽标用）
+    var pendingCountsByQuadrant: [Int] {
+        var counts = [0, 0, 0, 0]
+        for task in tasks where !task.isArchived && !task.isDone {
+            counts[task.quadrant.rawValue] += 1
+        }
+        return counts
+    }
+
     var archivedTasks: [TaskItem] {
         tasks.filter(\.isArchived)
             .sorted { ($0.archivedAt ?? .distantPast) > ($1.archivedAt ?? .distantPast) }

@@ -63,6 +63,7 @@ struct RootView: View {
             }
         }
         .onChange(of: skinRaw) { _ in Self.applyAppAppearance() }
+        .onAppear { FloatingBallManager.shared.start(store: store) }
         .sheet(isPresented: Binding(
             get: { screenshot.phase == .results },
             set: { if !$0 { screenshot.dismissResults() } }

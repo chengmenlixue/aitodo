@@ -11,3 +11,4 @@ build/
 # 调试输出
 /tmp/
 aitodo_debug.log
+.zcode/

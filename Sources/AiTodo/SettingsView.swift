@@ -4,6 +4,8 @@ struct SettingsView: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @AppStorage("skin") private var skinRaw = AppSkin.classic.rawValue
     @AppStorage("autoArchiveEnabled") private var autoArchiveEnabled = true
+    @AppStorage("floatingBallEnabled") private var floatingBallEnabled = true
+    @AppStorage("menuBarBadgeEnabled") private var menuBarBadgeEnabled = true
     @AppStorage("aiProvider") private var aiProviderRaw = AIProviderKind.zhipu.rawValue
     @AppStorage("aiBaseURL") private var aiBaseURL = AIProviderKind.zhipu.defaultBaseURL
     @AppStorage("aiModel") private var aiModel = AIProviderKind.zhipu.defaultModel
@@ -35,7 +37,7 @@ struct SettingsView: View {
                     SettingsCard(icon: "gearshape.fill", title: "通用") {
                         generalSection
                     }
-                    Text("待办 AiTodo v1.2.0 · 数据保存在本机")
+                    Text("待办 AiTodo v1.4.0 · 数据保存在本机")
                         .font(.system(size: 10))
                         .foregroundColor(Theme.textTertiary)
                         .frame(maxWidth: .infinity, alignment: .center)
@@ -191,6 +193,28 @@ struct SettingsView: View {
                     .foregroundColor(Theme.textSecondary)
                 Spacer()
             }
+
+            Divider()
+
+            Toggle(isOn: $floatingBallEnabled) {
+                Text("桌面悬浮球")
+                    .font(.system(size: 13))
+                    .foregroundColor(Theme.textPrimary)
+            }
+            .toggleStyle(.switch)
+            Text("屏幕上常驻四象限计数悬浮球：左键显示/隐藏待办窗口，可拖动，右键更多操作")
+                .font(.system(size: 11))
+                .foregroundColor(Theme.textTertiary)
+
+            Toggle(isOn: $menuBarBadgeEnabled) {
+                Text("菜单栏数字")
+                    .font(.system(size: 13))
+                    .foregroundColor(Theme.textPrimary)
+            }
+            .toggleStyle(.switch)
+            Text("菜单栏常驻四色分格，显示各象限未完成数，点击弹出快捷菜单")
+                .font(.system(size: 11))
+                .foregroundColor(Theme.textTertiary)
         }
     }
 
