@@ -228,15 +228,19 @@ final class SelectionCoordinator {
 
 }
 
-// MARK: - 屏幕截图（ScreenCaptureKit，macOS 13 回退 CGDisplayCreateImage）
+// MARK: - 屏幕截图（ScreenCaptureKit，macOS 13/x86_64 回退 CGDisplayCreateImage）
 
 enum CaptureDisplay {
     static func image(displayID: CGDirectDisplayID, sourceRect: CGRect, pixelScale: CGFloat) async throws -> CGImage {
+        #if arch(x86_64)
+        // CGDisplayCreateImage 在 arm64 目标被标记不可用，仅 Intel 编译纳入回退
         if #available(macOS 14.0, *) {
             return try await screenCaptureKitImage(displayID: displayID, sourceRect: sourceRect, pixelScale: pixelScale)
         }
-        // macOS 13（Intel 包）：ScreenCaptureKit 截图 API 不可用
         return try legacyDisplayImage(displayID: displayID, sourceRect: sourceRect)
+        #else
+        return try await screenCaptureKitImage(displayID: displayID, sourceRect: sourceRect, pixelScale: pixelScale)
+        #endif
     }
 
     @available(macOS 14.0, *)
@@ -256,6 +260,7 @@ enum CaptureDisplay {
         return try await SCScreenshotManager.captureImage(contentFilter: filter, configuration: config)
     }
 
+    #if arch(x86_64)
     /// 选区坐标为显示器本地坐标（顶部原点），整屏截取后按像素密度裁剪
     private static func legacyDisplayImage(displayID: CGDirectDisplayID, sourceRect: CGRect) throws -> CGImage {
         guard let full = CGDisplayCreateImage(displayID) else {
@@ -271,6 +276,7 @@ enum CaptureDisplay {
         }
         return cropped
     }
+    #endif
 }
 
 // MARK: - 选区覆盖视图
