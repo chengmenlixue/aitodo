@@ -33,6 +33,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
             UNUserNotificationCenter.current().delegate = self
         }
         ScreenshotManager.shared.registerHotkey()
+        if ProcessInfo.processInfo.environment["AITODO_TEST_REMINDER"] != nil {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 2) { Self.fireTestReminder() }
+        }
         if let path = ProcessInfo.processInfo.environment["AITODO_SNAPSHOT"] {
             DispatchQueue.main.asyncAfter(deadline: .now() + 2) { Self.snapshot(to: path) }
             // 第二张：供运行中外部修改 defaults 后对比（验证皮肤即时切换）
@@ -67,9 +70,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { true }
 
+    /// 调试用：AITODO_TEST_REMINDER=1 启动时排一条 5 秒后的测试通知（验证横幅图标）
+    static func fireTestReminder() {
+        UNUserNotificationCenter.current().getNotificationSettings { s in
+            DebugLog.write("通知权限：authorization=\(s.authorizationStatus.rawValue) alert=\(s.alertSetting.rawValue) notifCenter=\(s.notificationCenterSetting.rawValue)")
+        }
+        let content = UNMutableNotificationContent()
+        content.title = "待办提醒（图标测试）"
+        content.body = "这是 5 秒后触发的测试通知"
+        content.sound = .default
+        let trigger = UNTimeIntervalNotificationTrigger(timeInterval: 5, repeats: false)
+        let request = UNNotificationRequest(identifier: "aitodo.test-reminder", content: content, trigger: trigger)
+        UNUserNotificationCenter.current().add(request)
+        DebugLog.write("测试通知已排定（5s 后）")
+    }
+
     func userNotificationCenter(_ center: UNUserNotificationCenter,
                                 willPresent notification: UNNotification,
                                 withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void) {
+        DebugLog.write("前台通知 willPresent：\(notification.request.content.title)")
         completionHandler([.banner, .sound])
     }
 }

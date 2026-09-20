@@ -67,4 +67,12 @@ cat > "$APP/Contents/Info.plist" <<'PLIST'
 PLIST
 
 codesign --force --sign - "$APP"
+
+# 重新注册到 LaunchServices：ad-hoc 重签名后 UUID/签名变化，
+# 不刷新会导致系统定时通知横幅解析不到应用图标（显示空白）
+LSREG="/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister"
+if [ -x "$LSREG" ]; then
+    "$LSREG" -f "$APP" >/dev/null 2>&1 || true
+    echo ">> 已注册到 LaunchServices"
+fi
 echo ">> 完成：$APP （open $APP 启动）"
