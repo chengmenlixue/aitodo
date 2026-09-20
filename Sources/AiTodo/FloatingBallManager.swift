@@ -26,6 +26,8 @@ final class FloatingBallManager: NSObject, ObservableObject, NSMenuDelegate, NSW
     @Published var popupInputVisible = false
     /// 面板中展开详情的任务（nil = 无）
     @Published private(set) var expandedTaskID: UUID?
+    /// 正在自定义截止时间的任务（详情内显示日期选择器）
+    @Published var customDueTaskID: UUID?
 
     /// 「隐藏直到下次重启」：仅本次运行内隐藏，不落盘
     private var sessionHidden = false
@@ -34,10 +36,7 @@ final class FloatingBallManager: NSObject, ObservableObject, NSMenuDelegate, NSW
     private var statusItem: NSStatusItem?
     private var store: TaskStore?
     private var tasksSubscription: AnyCancellable?
-    private var screenshotSubscription: AnyCancellable?
     private var popupMonitors: [Any] = []
-    /// 面板上触发的截图：结果回来时把主窗口带出来（sheet/alert 都挂在主窗口）
-    private var awaitingScreenshotResult = false
     /// 程序性设框期间抑制 windowDidMove 的拖拽联动
     private var suppressPopupMoveObservation = false
     /// 面板最近一次已知原点（用户拖拽面板时据此算位移联动悬浮球）
@@ -78,10 +77,6 @@ final class FloatingBallManager: NSObject, ObservableObject, NSMenuDelegate, NSW
                 self?.refreshPopupFrame()
             }
 
-        screenshotSubscription = ScreenshotManager.shared.$phase
-            .receive(on: DispatchQueue.main)
-            .sink { [weak self] _ in self?.handleScreenshotPhase() }
-
         makePanelIfNeeded()
         refreshBallVisibility()
         refreshStatusItem()
@@ -92,18 +87,6 @@ final class FloatingBallManager: NSObject, ObservableObject, NSMenuDelegate, NSW
         guard let store else { return }
         quadrantCounts = store.pendingCountsByQuadrant
         statusItem?.button?.image = Self.renderStatusImage(counts: quadrantCounts)
-    }
-
-    /// 面板里触发的截图：结果/失败时把主窗口带出来
-    private func handleScreenshotPhase() {
-        guard awaitingScreenshotResult else { return }
-        switch ScreenshotManager.shared.phase {
-        case .results, .failed:
-            awaitingScreenshotResult = false
-            showMainWindow()
-        default:
-            break
-        }
     }
 
     // MARK: - 悬浮球面板
@@ -218,6 +201,7 @@ final class FloatingBallManager: NSObject, ObservableObject, NSMenuDelegate, NSW
         guard let store, let ballPanel = panel else { return }
         popupInputVisible = false
         expandedTaskID = nil
+        customDueTaskID = nil
         popupQuadrant = quadrant
         let popup = ensurePopupPanel()
         let view = FloatingBallPopupView(manager: self, store: store, quadrant: quadrant)
@@ -277,6 +261,9 @@ final class FloatingBallManager: NSObject, ObservableObject, NSMenuDelegate, NSW
            pending.count <= PopupMetrics.maxVisibleRows,
            let task = pending.first(where: { $0.id == expandedTaskID }) {
             detail = PopupMetrics.detailHeight(subtaskCount: task.subtasks.count)
+            if customDueTaskID == expandedTaskID {
+                detail += PopupMetrics.customDueHeight
+            }
         }
         return PopupMetrics.height(itemCount: pending.count, inputVisible: popupInputVisible, detail: detail)
     }
@@ -338,12 +325,25 @@ final class FloatingBallManager: NSObject, ObservableObject, NSMenuDelegate, NSW
         popupQuadrant = nil
         popupInputVisible = false
         expandedTaskID = nil
+        customDueTaskID = nil
         removePopupMonitors()
     }
 
     /// 行点击展开/收起详情（再点同一行收起）
     func setExpandedTask(_ id: UUID?) {
         expandedTaskID = (expandedTaskID == id) ? nil : id
+        if expandedTaskID != id { customDueTaskID = nil }
+        refreshPopupFrame()
+    }
+
+    /// 「自定义…」截止时间：展开该行详情并切换内嵌日期选择器
+    func toggleCustomDue(_ id: UUID) {
+        if customDueTaskID == id {
+            customDueTaskID = nil
+        } else {
+            expandedTaskID = id
+            customDueTaskID = id
+        }
         refreshPopupFrame()
     }
 
@@ -363,11 +363,10 @@ final class FloatingBallManager: NSObject, ObservableObject, NSMenuDelegate, NSW
         refreshPopupFrame()
     }
 
-    /// 面板上的截图识别：先收起面板，结果回来时把主窗口带出来
+    /// 面板上的截图识别：先收起面板，结果在独立浮动面板展示（不呼出主窗口）
     func triggerScreenshotFromPopup() {
         guard ScreenshotManager.shared.phase == .idle else { return }
         closePopup()
-        awaitingScreenshotResult = true
         ScreenshotManager.shared.trigger()
     }
 

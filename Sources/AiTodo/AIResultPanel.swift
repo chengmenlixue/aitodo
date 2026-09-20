@@ -6,6 +6,9 @@ struct AIResultPanel: View {
     @EnvironmentObject private var store: TaskStore
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
+    @FocusState private var focusedRow: UUID?
+    @State private var keyMonitor: Any?
+
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack {
@@ -33,6 +36,9 @@ struct AIResultPanel: View {
             .frame(minHeight: 100, maxHeight: 280)
 
             HStack {
+                Text("光标在标题框时按 ↑/↓ 切换该条象限")
+                    .font(.system(size: 10))
+                    .foregroundColor(Theme.textTertiary)
                 Spacer()
                 Button("取消") { manager.dismissResults() }
                     .keyboardShortcut(.cancelAction)
@@ -42,6 +48,42 @@ struct AIResultPanel: View {
         }
         .padding(16)
         .frame(width: 500)
+        .onAppear { installQuadrantKeyMonitor() }
+        .onDisappear { removeQuadrantKeyMonitor() }
+    }
+
+    // MARK: - ↑/↓ 键循环切换聚焦行的象限（与主窗口输入框一致）
+
+    private func installQuadrantKeyMonitor() {
+        guard keyMonitor == nil else { return }
+        keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
+            guard focusedRow != nil else { return event }
+            switch (event.keyCode, event.charactersIgnoringModifiers) {
+            case (125, _), (_, "\u{F701}"):   // ↓
+                cycleFocusedQuadrant(+1)
+                return nil
+            case (126, _), (_, "\u{F702}"):   // ↑
+                cycleFocusedQuadrant(-1)
+                return nil
+            default:
+                return event
+            }
+        }
+    }
+
+    private func removeQuadrantKeyMonitor() {
+        if let monitor = keyMonitor {
+            NSEvent.removeMonitor(monitor)
+            keyMonitor = nil
+        }
+    }
+
+    private func cycleFocusedQuadrant(_ offset: Int) {
+        guard let id = focusedRow,
+              let index = manager.resultTasks.firstIndex(where: { $0.id == id }) else { return }
+        let all = Quadrant.allCases
+        let current = manager.resultTasks[index].quadrant
+        manager.resultTasks[index].quadrant = all[(all.firstIndex(of: current)! + offset + all.count) % all.count]
     }
 
     /// 可选主任务（未完成、未归档的顶层任务）
@@ -97,6 +139,7 @@ struct AIResultPanel: View {
                 .textFieldStyle(.plain)
                 .font(.system(size: 13))
                 .foregroundColor(Theme.textPrimary)
+                .focused($focusedRow, equals: task.id)
 
             Menu {
                 ForEach(Quadrant.allCases) { quadrant in

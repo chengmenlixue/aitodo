@@ -14,6 +14,10 @@ enum PopupMetrics {
     /// 展开详情：「子任务 m/n」小标题
     static let detailSubHeaderHeight: CGFloat = 22
     static let subtaskRowHeight: CGFloat = 28
+    /// 展开详情：底部「添加子任务」输入行
+    static let subtaskInputHeight: CGFloat = 32
+    /// 展开详情：自定义截止时间的日期选择器行
+    static let customDueHeight: CGFloat = 44
 
     static func height(itemCount: Int, inputVisible: Bool, detail: CGFloat = 0) -> CGFloat {
         let list = itemCount == 0
@@ -24,7 +28,7 @@ enum PopupMetrics {
 
     static func detailHeight(subtaskCount: Int) -> CGFloat {
         let header: CGFloat = subtaskCount == 0 ? 0 : detailSubHeaderHeight
-        return detailBaseHeight + header + CGFloat(subtaskCount) * subtaskRowHeight
+        return detailBaseHeight + header + CGFloat(subtaskCount) * subtaskRowHeight + subtaskInputHeight
     }
 }
 
@@ -49,6 +53,9 @@ struct FloatingBallPopupView: View {
         if pending.count <= PopupMetrics.maxVisibleRows,
            let expanded = pending.first(where: { $0.id == manager.expandedTaskID }) {
             height += PopupMetrics.detailHeight(subtaskCount: expanded.subtasks.count)
+            if manager.customDueTaskID == expanded.id {
+                height += PopupMetrics.customDueHeight
+            }
         }
         return height
     }
@@ -121,6 +128,7 @@ struct FloatingBallPopupView: View {
                             task: task,
                             accent: Color(hex: quadrant.accentHex),
                             isExpanded: manager.expandedTaskID == task.id,
+                            isCustomDue: manager.customDueTaskID == task.id,
                             onToggleDone: {
                                 withAnimation(.spring(response: 0.25, dampingFraction: 0.8)) {
                                     store.toggle(id: task.id)
@@ -132,6 +140,8 @@ struct FloatingBallPopupView: View {
                             onArchive: { store.archive(id: task.id) },
                             onDelete: { store.delete(id: task.id) },
                             onToggleSubtask: { store.toggleSubtask(id: task.id, subtaskID: $0) },
+                            onAddSubtask: { store.addSubtask(id: task.id, title: $0) },
+                            onToggleCustomDue: { manager.toggleCustomDue(task.id) },
                             onEditBegin: { manager.activatePopupForEditing() }
                         )
                         .frame(height: rowHeight(of: task))
@@ -153,6 +163,9 @@ struct FloatingBallPopupView: View {
         if manager.expandedTaskID == task.id,
            pending.count <= PopupMetrics.maxVisibleRows {
             height += PopupMetrics.detailHeight(subtaskCount: task.subtasks.count)
+            if manager.customDueTaskID == task.id {
+                height += PopupMetrics.customDueHeight
+            }
         }
         return height
     }
@@ -232,12 +245,13 @@ struct FloatingBallPopupView: View {
 // MARK: - 任务行
 
 /// 面板任务行：
-/// - 圆圈 = 勾选完成；点行 = 展开/收起详情（任务信息 + 子任务）
+/// - 圆圈 = 勾选完成；点行 = 展开/收起详情（任务信息 + 子任务 + 添加子任务）
 /// - 悬停浮现 编辑 / 时间 / 归档 / 删除 四个小图标
 private struct TaskLine: View {
     let task: TaskItem
     let accent: Color
     let isExpanded: Bool
+    let isCustomDue: Bool
     let onToggleDone: () -> Void
     let onToggleExpand: () -> Void
     let onRename: (String) -> Void
@@ -245,12 +259,16 @@ private struct TaskLine: View {
     let onArchive: () -> Void
     let onDelete: () -> Void
     let onToggleSubtask: (UUID) -> Void
+    let onAddSubtask: (String) -> Void
+    let onToggleCustomDue: () -> Void
     let onEditBegin: () -> Void
 
     @State private var hovered = false
     @State private var editing = false
     @State private var editDraft = ""
+    @State private var subDraft = ""
     @FocusState private var editFocused: Bool
+    @FocusState private var subFocused: Bool
 
     private static let dueFormatter: DateFormatter = {
         let formatter = DateFormatter()
@@ -349,14 +367,22 @@ private struct TaskLine: View {
         .buttonStyle(.plain)
     }
 
-    /// 截止时间快捷菜单
+    /// 截止时间快捷菜单：相对时间 / 整点日期 / 自定义 / 清除
     private var dueMenu: some View {
         Menu {
-            ForEach(Self.duePresets, id: \.label) { preset in
+            Button("10分钟后") { onSetDue(Date().addingTimeInterval(600)) }
+            Button("半小时后") { onSetDue(Date().addingTimeInterval(1800)) }
+            Button("1小时后") { onSetDue(Date().addingTimeInterval(3600)) }
+            Divider()
+            ForEach(Self.dayPresets, id: \.label) { preset in
                 Button(preset.label) { onSetDue(preset.date()) }
             }
             Divider()
-            Button("清除截止时间") { onSetDue(nil) }
+            Button(isCustomDue ? "收起自定义" : "自定义…") { onToggleCustomDue() }
+            Button("清除截止时间") {
+                onSetDue(nil)
+                if isCustomDue { onToggleCustomDue() }
+            }
         } label: {
             Image(systemName: "clock")
                 .font(.system(size: 10, weight: .medium))
@@ -368,7 +394,7 @@ private struct TaskLine: View {
         .fixedSize()
     }
 
-    private static let duePresets: [(label: String, date: () -> Date)] = {
+    private static let dayPresets: [(label: String, date: () -> Date)] = {
         let calendar = Calendar.current
         func at(_ dayOffset: Int, _ hour: Int, _ minute: Int = 0) -> () -> Date {
             return {
@@ -431,11 +457,65 @@ private struct TaskLine: View {
                     subtaskRow(sub)
                 }
             }
+            subtaskInputRow
+            if isCustomDue {
+                customDueRow
+            }
             Spacer(minLength: 0)
         }
         .padding(.horizontal, 14)
         .padding(.top, 2)
         .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    /// 添加子任务：回车即加，输入时自动激活键盘
+    private var subtaskInputRow: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "plus.circle.fill")
+                .font(.system(size: 11))
+                .foregroundColor(accent)
+            TextField("添加子任务…", text: $subDraft)
+                .textFieldStyle(.plain)
+                .font(.system(size: 11))
+                .foregroundColor(Theme.textPrimary)
+                .focused($subFocused)
+                .onSubmit { addSub() }
+                .onChange(of: subFocused) { focused in
+                    if focused { onEditBegin() }
+                }
+            if !subDraft.trimmingCharacters(in: .whitespaces).isEmpty {
+                Button(action: addSub) {
+                    Image(systemName: "arrow.up.circle.fill")
+                        .font(.system(size: 13))
+                        .foregroundColor(accent)
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .frame(height: PopupMetrics.subtaskInputHeight)
+    }
+
+    private func addSub() {
+        let title = subDraft.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !title.isEmpty else { return }
+        onAddSubtask(title)
+        subDraft = ""
+        subFocused = true
+    }
+
+    /// 自定义截止时间：内嵌日期选择器，滚动即保存
+    private var customDueRow: some View {
+        DatePicker(
+            "截止",
+            selection: Binding(
+                get: { task.dueDate ?? Date() },
+                set: { onSetDue($0) }
+            ),
+            displayedComponents: [.date, .hourAndMinute]
+        )
+        .labelsHidden()
+        .font(.system(size: 11))
+        .frame(height: PopupMetrics.customDueHeight)
     }
 
     private var dueInfoRow: some View {

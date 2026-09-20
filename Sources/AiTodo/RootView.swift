@@ -63,20 +63,9 @@ struct RootView: View {
             }
         }
         .onChange(of: skinRaw) { _ in Self.applyAppAppearance() }
-        .onAppear { FloatingBallManager.shared.start(store: store) }
-        .sheet(isPresented: Binding(
-            get: { screenshot.phase == .results },
-            set: { if !$0 { screenshot.dismissResults() } }
-        )) {
-            AIResultPanel(manager: screenshot)
-        }
-        .alert("截图解析失败", isPresented: Binding(
-            get: { screenshot.lastError != nil },
-            set: { if !$0 { screenshot.dismissError() } }
-        )) {
-            Button("知道了", role: .cancel) {}
-        } message: {
-            Text(screenshot.lastError ?? "")
+        .onAppear {
+            FloatingBallManager.shared.start(store: store)
+            RecognitionPanelController.shared.start(store: store)
         }
     }
 
