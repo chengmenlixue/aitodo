@@ -197,6 +197,7 @@ struct WindowAccessor: NSViewRepresentable {
 
     static func configure(_ window: NSWindow?) {
         guard let window else { return }
+        installCloseInterceptor(on: window)
         let skin = AppSkin.from(UserDefaults.standard.string(forKey: "skin"))
         window.isOpaque = skin != .glass
         switch skin {
@@ -209,6 +210,43 @@ struct WindowAccessor: NSViewRepresentable {
             window.backgroundColor = NSColor(srgbRed: 0x0B / 255.0, green: 0x0B / 255.0,
                                              blue: 0x0C / 255.0, alpha: 1)
         }
+    }
+
+    /// 主窗口的 SwiftUI 代理包一层转发拦截：「关闭」（⌘W/红点）改为最小化到 Dock，
+    /// 窗口对象不被销毁——应用常驻（悬浮球/菜单栏不退出），悬浮球或 Dock 图标可唤回。
+    /// 转发兜底保证 SwiftUI 自身依赖的代理回调不受影响。
+    private static var closeInterceptor: WindowCloseInterceptor?
+
+    private static func installCloseInterceptor(on window: NSWindow) {
+        guard !(window.delegate is WindowCloseInterceptor) else { return }
+        DebugLog.write("安装主窗口关闭拦截器（原 delegate=\(String(describing: type(of: window.delegate)))）")
+        let interceptor = WindowCloseInterceptor(original: window.delegate)
+        // NSWindow.delegate 是弱引用：拦截器必须静态保活，否则赋值后立即释放
+        closeInterceptor = interceptor
+        window.delegate = interceptor
+    }
+}
+
+private final class WindowCloseInterceptor: NSObject, NSWindowDelegate {
+    private weak var original: NSWindowDelegate?
+
+    init(original: NSWindowDelegate?) {
+        self.original = original
+    }
+
+    override func responds(to aSelector: Selector!) -> Bool {
+        super.responds(to: aSelector) || (original?.responds(to: aSelector) ?? false)
+    }
+
+    override func forwardingTarget(for aSelector: Selector!) -> Any? { original }
+
+    func windowShouldClose(_ sender: NSWindow) -> Bool {
+        DebugLog.write("windowShouldClose 拦截：title=\(sender.title)")
+        // 「关闭」=隐藏窗口而非销毁：应用常驻（悬浮球/菜单栏不退出）。
+        // 恢复只走 Dock 图标或菜单「显示待办窗口」——悬浮球点击不唤回（产品语义）
+        sender.orderOut(nil)
+        FloatingBallManager.shared.mainWindowDidCloseByCommand()
+        return false
     }
 }
 

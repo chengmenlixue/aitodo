@@ -43,6 +43,48 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
             // 同时写出窗口在 CGEvent 全局坐标系中的位置（供合成拖拽验证脚本定位）
             DispatchQueue.main.asyncAfter(deadline: .now() + 2) { Self.writeWindowFrame() }
         }
+        if ProcessInfo.processInfo.environment["AITODO_TEST_CLOSE"] != nil {
+            // 调试用：对主窗口执行 performClose（验证「关闭=隐藏窗口、应用常驻」）
+            // 启动基线（+2s）：正常显示状态下 occlusion 是否会报 visible（区分环境因素与代码缺陷）
+            DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
+                let w = NSApp.windows.first { !($0 is NSPanel) && $0.title == "待办" }
+                DebugLog.write("启动基线：window=\(w != nil) occlusionVisible=\(w?.occlusionState.contains(.visible) ?? false)")
+            }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 3) { Self.testClose() }
+        }
+        if ProcessInfo.processInfo.environment["AITODO_TEST_QUIT"] != nil {
+            // 调试用：4 秒后执行 NSApp.terminate（验证「退出待办」链路是否可靠）
+            DispatchQueue.main.asyncAfter(deadline: .now() + 4) {
+                DebugLog.write("测试退出：NSApp.terminate")
+                NSApp.terminate(nil)
+                // 若 terminate 未完成（被挂起），2 秒后兜底强退，保证退出永不失效
+                DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
+                    DebugLog.write("测试退出：terminate 未完成，兜底 exit")
+                    exit(0)
+                }
+            }
+        }
+    }
+
+    /// 应用被激活（如识别结果面板 NSApp.activate）时的副作用防御：
+    /// ⌘W 关闭的主窗口不被悄悄带回屏幕
+    func applicationDidBecomeActive(_ notification: Notification) {
+        FloatingBallManager.shared.reassertMainWindowHidden()
+    }
+
+    /// 调试用：AITODO_TEST_CLOSE=1 启动时触发主窗口关闭流程
+    static func testClose() {
+        let window = NSApp.windows.first { !($0 is NSPanel) && $0.title == "待办" }
+        DebugLog.write("测试关闭：window=\(window != nil) delegate=\(String(describing: type(of: window?.delegate)))")
+        window?.performClose(nil)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1) {
+            // 验证关闭后悬浮球点击（toggleMainWindow）不唤回窗口
+            FloatingBallManager.shared.toggleMainWindow()
+            DebugLog.write("关闭后 toggleMainWindow：isVisible=\(window?.isVisible ?? false)（期望 false=不唤回）")
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
+            DebugLog.write("测试关闭后：window存活=\(window != nil) visible=\(window?.isVisible ?? false) mini=\(window?.isMiniaturized ?? false) occlusionVisible=\(window?.occlusionState.contains(.visible) ?? false)")
+        }
     }
 
     /// 调试用：把主窗口内容渲染为 PNG（AITODO_SNAPSHOT=/path/to.png 时触发）
@@ -68,7 +110,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         DebugLog.write("窗口 frame：\(text)")
     }
 
-    func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { true }
+    /// 应用常驻：主窗口「关闭」被拦截为最小化（见 WindowCloseInterceptor），
+    /// 此处兜底——即使窗口被程序性 close 也不退出，悬浮球/菜单栏保持在线
+    func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { false }
+
+    /// 点击 Dock 图标：主窗口不在屏时恢复显示。
+    /// 注意 flag 不可信：SwiftUI 窗口最小化后仍上报 isVisible=true（flag=true），
+    /// 因此忽略 flag，总是做一次 occlusion 感知的恢复尝试（窗口在屏时为无害 no-op）
+    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+        DebugLog.write("applicationShouldHandleReopen: flag=\(flag)")
+        if FloatingBallManager.shared.restoreMainWindow() {
+            return false
+        }
+        return true
+    }
 
     /// 调试用：AITODO_TEST_REMINDER=1 启动时排一条 5 秒后的测试通知（验证横幅图标）
     static func fireTestReminder() {

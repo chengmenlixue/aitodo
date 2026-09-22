@@ -166,25 +166,78 @@ final class FloatingBallManager: NSObject, ObservableObject, NSMenuDelegate, NSW
 
     private var mainWindowHidden: Bool {
         guard let window = mainWindow else { return true }
-        return window.isMiniaturized || !window.isVisible
+        return !windowOnScreen(window)
     }
 
-    /// 隐藏必须用 miniaturize（不能用 orderOut，会触发「最后一个窗口关闭」导致 App 退出）
+    /// 主窗口被 ⌘W 关闭隐藏（区别于悬浮球的最小化隐藏）：
+    /// 点击悬浮球不唤回，恢复只走 Dock 图标或菜单「显示待办窗口」
+    private var mainWindowHiddenByClose = false
+
+    /// 窗口是否真的在屏幕上。SwiftUI 窗口最小化后 isMiniaturized/isVisible 标志不可靠
+    /// （实测出现过 mini=false/visible=true 但窗口只剩 Dock 代理），occlusionState 是唯一可信信号
+    private func windowOnScreen(_ window: NSWindow) -> Bool {
+        window.occlusionState.contains(.visible)
+    }
+
+    /// 隐藏主窗口（⌘W 关闭已被拦截为隐藏，两者共用同一套显示状态语义；
+    /// 这里保留 miniaturize：Dock 图标可点回的交互不变）
     func toggleMainWindow() {
         closePopup()
+        guard let window = mainWindow, windowOnScreen(window) else { return }
+        // 已隐藏状态点击悬浮球不唤回窗口：恢复走 Dock 图标或菜单「显示待办窗口」
+        window.miniaturize(nil)
+    }
+
+    /// 菜单「显示/隐藏待办窗口」：显式指令，隐藏时允许唤回
+    func toggleMainWindowFromMenu() {
+        closePopup()
         guard let window = mainWindow else { return }
-        if window.isMiniaturized || !window.isVisible {
-            showMainWindow()
-        } else {
+        if windowOnScreen(window) {
             window.miniaturize(nil)
+        } else {
+            showMainWindow()
+        }
+    }
+
+    /// 应用激活副作用的防御：⌘W 关闭的窗口不被激活逻辑（如识别结果面板的 NSApp.activate）悄悄带回
+    func reassertMainWindowHidden() {
+        guard mainWindowHiddenByClose, let window = mainWindow else { return }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self, weak window] in
+            // 必须复查标志：延迟期间窗口可能已被 Dock 图标/菜单合法恢复
+            guard let self, self.mainWindowHiddenByClose, let window, window.isVisible else { return }
+            window.orderOut(nil)
+            DebugLog.write("防御：重新隐藏被激活逻辑带回的主窗口")
         }
     }
 
     private func showMainWindow() {
         guard let window = mainWindow else { return }
-        if window.isMiniaturized { window.deminiaturize(nil) }
+        mainWindowHiddenByClose = false
+        if !windowOnScreen(window) {
+            window.deminiaturize(nil)   // 在 Dock 中则还原（对非最小化窗口是无害 no-op）
+        }
         window.makeKeyAndOrderFront(nil)
+        // 关闭拦截后的窗口处于特殊隐藏态：makeKeyAndOrderFront 会被窗口系统当作冗余操作跳过，
+        // orderFrontRegardless 强制重新上屏
+        window.orderFrontRegardless()
         NSApp.activate(ignoringOtherApps: true)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak window] in
+            DebugLog.write("showMainWindow 后：isVisible=\(window?.isVisible ?? false) occlusionVisible=\(window?.occlusionState.contains(.visible) ?? false)")
+        }
+    }
+
+    /// ⌘W 关闭拦截回调（RootView.WindowCloseInterceptor）：标记关闭态
+    func mainWindowDidCloseByCommand() {
+        mainWindowHiddenByClose = true
+    }
+
+    /// Dock 图标点击 / reopen：主窗口不在屏幕上时恢复显示；返回是否执行了恢复
+    @discardableResult
+    func restoreMainWindow() -> Bool {
+        guard let window = mainWindow, !windowOnScreen(window) else { return false }
+        DebugLog.write("reopen/恢复：主窗口不在屏，执行还原")
+        showMainWindow()
+        return true
     }
 
     // MARK: - 色格弹出面板
@@ -427,6 +480,8 @@ final class FloatingBallManager: NSObject, ObservableObject, NSMenuDelegate, NSW
         menu.addItem(.separator())
         menu.addItem(menuItem("隐藏直到下次重启", action: #selector(hideBallForSessionAction)))
         menu.addItem(menuItem("停用桌面悬浮球", action: #selector(disableBallAction)))
+        menu.addItem(.separator())
+        menu.addItem(menuItem("退出待办", action: #selector(quitAction)))
         return menu
     }
 
@@ -436,8 +491,17 @@ final class FloatingBallManager: NSObject, ObservableObject, NSMenuDelegate, NSW
         return item
     }
 
-    @objc private func toggleMainWindowAction() { toggleMainWindow() }
+    @objc private func toggleMainWindowAction() { toggleMainWindowFromMenu() }
     @objc private func screenshotAction() { ScreenshotManager.shared.trigger() }
+    @objc private func quitAction() {
+        DebugLog.write("退出待办：NSApp.terminate")
+        NSApp.terminate(nil)
+        // terminate 被挂起时的兜底强退：数据随每次变更即时落盘，无丢失风险
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
+            DebugLog.write("退出待办：terminate 未完成，兜底 exit")
+            exit(0)
+        }
+    }
 
     @objc private func hideBallForSessionAction() {
         sessionHidden = true
@@ -477,6 +541,8 @@ final class FloatingBallManager: NSObject, ObservableObject, NSMenuDelegate, NSW
         menu.addItem(menuItem(ballEnabled ? "隐藏桌面悬浮球" : "显示桌面悬浮球",
                               action: #selector(toggleBallAction)))
         menu.addItem(menuItem("隐藏菜单栏数字", action: #selector(hideMenuBarAction)))
+        menu.addItem(.separator())
+        menu.addItem(menuItem("退出待办", action: #selector(quitAction)))
     }
 
     @objc private func toggleBallAction() {
