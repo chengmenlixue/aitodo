@@ -74,6 +74,9 @@ struct QuadrantCard: View {
             cardContent
             overlays
         }
+        // 命名坐标空间：行内 rowFrames 按此测量，墨晕/落位脉冲按卡片本地坐标定位
+        // （未声明命名空间时 .named 回退为全局坐标，高亮会整体偏移）
+        .coordinateSpace(name: Self.cardSpace)
         .background(cardBackground)
         .overlay(cardBorder)
         .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))

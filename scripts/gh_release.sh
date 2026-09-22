@@ -5,16 +5,20 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 
 TAG="${1:-v1.0.0}"
-ZIP="build/AiTodo-${TAG}-macOS-AppleSilicon.zip"
+ZIP_ARM="build/AiTodo-${TAG}-macOS-AppleSilicon.zip"
+ZIP_INTEL="build/AiTodo-${TAG}-macOS-Intel.zip"
 
-if [ ! -f "$ZIP" ]; then
-    echo ">> 未找到 $ZIP，请先运行 scripts/build_app.sh 并压缩"
+ASSETS=()
+[ -f "$ZIP_ARM" ] && ASSETS+=("$ZIP_ARM")
+[ -f "$ZIP_INTEL" ] && ASSETS+=("$ZIP_INTEL")
+if [ ${#ASSETS[@]} -eq 0 ]; then
+    echo ">> 未找到 $ZIP_ARM / $ZIP_INTEL，先运行 scripts/build_app.sh（ARCH=arm64 与 ARCH=intel）并压缩"
     exit 1
 fi
 
-gh release create "$TAG" "$ZIP" \
+gh release create "$TAG" "${ASSETS[@]}" \
     --title "待办 AiTodo ${TAG}" \
-    --notes "macOS 四象限待办应用（SwiftUI 原生，Apple Silicon）
+    --notes "macOS 四象限待办应用（SwiftUI 原生）
 
 **功能**
 - 艾森豪威尔四象限：重要·紧急 / 重要·不紧急 / 紧急·不重要 / 不重要·不紧急
@@ -23,11 +27,11 @@ gh release create "$TAG" "$ZIP" \
 - 任务提醒（系统通知）、归档、纯本地 JSON 存储
 
 **安装**
-1. 下载 zip 并解压
+1. 下载 zip 并解压（Apple Silicon 选 AppleSilicon 包，Intel 选 Intel 包）
 2. 将「待办」拖入「应用程序」文件夹（或直接双击运行）
 3. 首次启动若被 Gatekeeper 拦截：右键点击应用 → 选「打开」
 
-**要求**：macOS 13+，Apple Silicon（M 系列）
+**要求**：macOS 13+
 **说明**：应用为 ad-hoc 签名（未公证），首次打开需右键→打开；数据保存在本机 ~/Library/Application Support/AiTodo/"
 
 echo ">> Release 已发布: https://github.com/chengmenlixue/aitodo/releases/tag/${TAG}"

@@ -24,6 +24,8 @@ if [ -x "build/toolchain/usr/bin/swiftc" ]; then
 fi
 
 echo ">> 编译：${SWIFTC[*]}"
+# 两个架构都固定最低目标 13.0：不传 -target 时 swiftc 用宿主机默认（如 macos26.x），
+# 会直接抬高运行门槛且触发 CGDisplayCreateImage(obsoleted=15.0) 编译报错
 if [ "$ARCH" = "intel" ]; then
     "${SWIFTC[@]}" -O -parse-as-library \
         -target x86_64-apple-macos13.0 \
@@ -32,6 +34,7 @@ if [ "$ARCH" = "intel" ]; then
         Sources/AiTodo/*.swift
 else
     "${SWIFTC[@]}" -O -parse-as-library \
+        -target arm64-apple-macos13.0 \
         -sdk "$SDK" \
         -o build/AiTodo \
         Sources/AiTodo/*.swift
@@ -55,7 +58,7 @@ cat > "$APP/Contents/Info.plist" <<'PLIST'
     <key>CFBundleName</key><string>待办</string>
     <key>CFBundleDisplayName</key><string>待办</string>
     <key>CFBundlePackageType</key><string>APPL</string>
-    <key>CFBundleShortVersionString</key><string>1.4.1</string>
+    <key>CFBundleShortVersionString</key><string>1.4.2</string>
     <key>CFBundleVersion</key><string>1</string>
     <key>CFBundleIconFile</key><string>AppIcon</string>
     <key>LSMinimumSystemVersion</key><string>13.0</string>

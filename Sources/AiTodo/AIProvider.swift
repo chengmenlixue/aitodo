@@ -150,6 +150,11 @@ struct AIError: LocalizedError {
     var errorDescription: String? { message }
 }
 
+/// 模型输出不符合约定 JSON 格式（可附纠正提示重试一次；区别于 Key/HTTP 等不可重试错误）
+struct AIFormatError: LocalizedError {
+    var errorDescription: String? { "AI 未返回约定格式的 JSON" }
+}
+
 // MARK: - AI 解析器
 
 enum AITaskParser {
@@ -161,14 +166,12 @@ enum AITaskParser {
     """
 
 
-    /// 调用视觉模型解析截图
+    /// 调用视觉模型解析截图：输出不符合 JSON 约定时附纠正提示重试一次；
+    /// 网络/Key/HTTP 错误直接抛出，不做盲目的二次等待
     static func parseTasks(imagePNG data: Data) async throws -> [ParsedTask] {
         do {
             return try await request(imagePNG: data)
-        } catch let error as AIError {
-            throw error
-        } catch {
-            // 响应可能不规范：附纠正提示重试一次
+        } catch is AIFormatError {
             return try await request(imagePNG: data, strict: true)
         }
     }
@@ -241,12 +244,12 @@ enum AITaskParser {
               let choices = object["choices"] as? [[String: Any]],
               let message = choices.first?["message"] as? [String: Any],
               let content = message["content"] as? String else {
-            throw AIError(message: "AI 响应格式无法解析")
+            throw AIFormatError()
         }
         let tasks = parseContent(content)
         if tasks.isEmpty && !content.contains("tasks") {
             // 区分「确实没有任务」与「输出不符合 JSON 约定」
-            throw AIError(message: "AI 未返回约定格式的 JSON")
+            throw AIFormatError()
         }
         return tasks
     }

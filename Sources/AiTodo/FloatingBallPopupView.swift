@@ -215,9 +215,10 @@ struct FloatingBallPopupView: View {
     // MARK: - 动作
 
     private func addDraft() {
-        let title = draft.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !title.isEmpty else { return }
-        if store.add(title: title, quadrant: quadrant) != nil {
+        // 与主窗口输入一致：支持「18:30 买菜」快速带上提醒时间
+        let parsed = DueParser.parse(draft)
+        guard !parsed.title.isEmpty else { return }
+        if store.add(title: parsed.title, quadrant: quadrant, dueDate: parsed.due) != nil {
             draft = ""
             inputFocused = true
         }
@@ -406,7 +407,8 @@ private struct TaskLine: View {
         func nextMonday(_ hour: Int) -> () -> Date {
             return {
                 let today = calendar.startOfDay(for: Date())
-                let offset = (11 - (calendar.component(.weekday, from: today))) % 7 + 1
+                // 下一个周一（至少 +1 天）：weekday 1=周日 … 7=周六
+                let offset = (8 - calendar.component(.weekday, from: today)) % 7 + 1
                 return calendar.date(byAdding: .day, value: offset, to: today)
                     .map { calendar.date(bySettingHour: hour, minute: 0, second: 0, of: $0) ?? $0 }
                     ?? Date()

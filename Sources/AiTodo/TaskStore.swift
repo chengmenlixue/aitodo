@@ -1,3 +1,4 @@
+import AppKit
 import Combine
 import Foundation
 
@@ -15,6 +16,8 @@ final class TaskStore: ObservableObject {
     /// 实时腾位/嵌套的目标行（用于虚线高亮）
     @Published var nestTargetID: UUID?
     private var dragSnapshot: Data?
+    /// SwiftUI 拖拽没有「会话结束」回调，靠本地事件监视器兜底清理
+    private var dragEndMonitor: Any?
 
     private let fileURL: URL
     private var cancellables = Set<AnyCancellable>()
@@ -24,18 +27,40 @@ final class TaskStore: ObservableObject {
         DebugLog.write("beginDrag: \(id)")
         dragSnapshot = try? JSONEncoder().encode(tasks)
         draggingID = id
+        installDragEndWatch()
     }
 
-    /// 拖拽取消（移出卡片未落下）：恢复拖拽开始时的快照
-    func cancelDrag() {
-        if let data = dragSnapshot,
-           let restored = try? JSONDecoder().decode([TaskItem].self, from: data) {
-            tasks = restored
+    /// 拖拽会话结束但未落放（按 Esc 取消、拖出窗口外松手）时，SwiftUI 不会通知：
+    /// 下一次本地鼠标按下/按键时清理拖拽状态，避免源行停留在「拖拽中」外观。
+    /// 只清状态不回滚内容——保留用户松手前看到的最后一次实时腾位结果。
+    private func installDragEndWatch() {
+        guard dragEndMonitor == nil else { return }
+        dragEndMonitor = NSEvent.addLocalMonitorForEvents(
+            matching: [.leftMouseDown, .rightMouseDown, .otherMouseDown, .keyDown]
+        ) { [weak self] event in
+            self?.abandonDrag()
+            return event
         }
-        endDrag()
+    }
+
+    private func abandonDrag() {
+        removeDragEndWatch()
+        guard draggingID != nil else { return }
+        DebugLog.write("拖拽未落放：清理拖拽状态")
+        dragSnapshot = nil
+        draggingID = nil
+        nestTargetID = nil
+    }
+
+    private func removeDragEndWatch() {
+        if let monitor = dragEndMonitor {
+            NSEvent.removeMonitor(monitor)
+            dragEndMonitor = nil
+        }
     }
 
     func endDrag() {
+        removeDragEndWatch()
         dragSnapshot = nil
         draggingID = nil
         nestTargetID = nil
@@ -59,17 +84,23 @@ final class TaskStore: ObservableObject {
     private func placeTopLevel(_ item: inout TaskItem, quadrant: Quadrant, index: Int) {
         item.quadrant = quadrant
         item.isExpanded = false
-        let targetIDs = tasks.filter { !$0.isArchived && $0.quadrant == quadrant }.map(\.id)
-        let clamped = min(max(index, 0), targetIDs.count)
-        if clamped < targetIDs.count,
-           let anchorIndex = tasks.firstIndex(where: { $0.id == targetIDs[clamped] }) {
-            tasks.insert(item, at: anchorIndex)
-        } else if let lastIndex = targetIDs.last,
-                  let tailIndex = tasks.firstIndex(where: { $0.id == lastIndex }) {
-            tasks.insert(item, at: tailIndex + 1)
-        } else {
+        insertTopLevel(item, quadrant: quadrant, index: index)
+    }
+
+    /// 顶层插入：锚点按目标象限的展示顺序（未完成在前、各自保持录入顺序）计算，
+    /// 插入后把该象限的数组段整体重写为展示顺序，避免「已完成穿插在数组前部」时落点错位。
+    /// 跨象限的数组顺序没有展示语义（所有视图都按象限过滤/排序），整体重写是安全的。
+    private func insertTopLevel(_ item: TaskItem, quadrant: Quadrant, index: Int) {
+        let inQuadrant = tasks.filter { !$0.isArchived && $0.quadrant == quadrant }
+        var ordered = inQuadrant.filter { !$0.isDone } + inQuadrant.filter { $0.isDone }
+        let clamped = min(max(index, 0), ordered.count)
+        ordered.insert(item, at: clamped)
+        guard let first = tasks.firstIndex(where: { !$0.isArchived && $0.quadrant == quadrant }) else {
             tasks.append(item)
+            return
         }
+        tasks.removeAll { !$0.isArchived && $0.quadrant == quadrant }
+        tasks.insert(contentsOf: ordered, at: first)
     }
 
     private func placeNested(_ item: inout TaskItem, parentIndex: Int) {
@@ -180,33 +211,17 @@ final class TaskStore: ObservableObject {
     }
 
     func move(id: UUID, to quadrant: Quadrant) {
-        move(id: id, to: quadrant, insertionIndex: nil)
+        guard let fromIndex = tasks.firstIndex(where: { $0.id == id }),
+              !tasks[fromIndex].isArchived else { return }
+        var item = tasks.remove(at: fromIndex)
+        item.quadrant = quadrant
+        insertTopLevel(item, quadrant: quadrant, index: Int.max)
     }
 
     /// 展开状态（仅视图记忆，不属于内容修改）
     func setExpanded(id: UUID, to value: Bool) {
         guard let index = tasks.firstIndex(where: { $0.id == id }) else { return }
         tasks[index].isExpanded = value
-    }
-
-    /// 拖拽排序 / 跨象限移动：insertionIndex 为目标象限展示列表中的插入位置（nil = 追加到末尾）
-    func move(id: UUID, to quadrant: Quadrant, insertionIndex: Int?) {
-        guard let fromIndex = tasks.firstIndex(where: { $0.id == id }),
-              !tasks[fromIndex].isArchived else { return }
-        var item = tasks.remove(at: fromIndex)
-        item.quadrant = quadrant
-
-        let targetIDs = tasks.filter { !$0.isArchived && $0.quadrant == quadrant }.map(\.id)
-        let index = min(max(insertionIndex ?? targetIDs.count, 0), targetIDs.count)
-        if index < targetIDs.count,
-           let anchorIndex = tasks.firstIndex(where: { $0.id == targetIDs[index] }) {
-            tasks.insert(item, at: anchorIndex)
-        } else if let lastIndex = targetIDs.last,
-                  let tailIndex = tasks.firstIndex(where: { $0.id == lastIndex }) {
-            tasks.insert(item, at: tailIndex + 1)
-        } else {
-            tasks.append(item)
-        }
     }
 
     func rename(id: UUID, to title: String) {
@@ -304,20 +319,33 @@ final class TaskStore: ObservableObject {
     private func bindAutosave() {
         $tasks
             .dropFirst()
+            // 拖拽悬停期间会反复 remove+insert 出现等值中间态；等值不落盘
+            .removeDuplicates()
             .sink { [weak self] value in self?.writeToDisk(value) }
             .store(in: &cancellables)
     }
 
     private func load() {
-        guard let data = try? Data(contentsOf: fileURL),
-              let decoded = try? JSONDecoder().decode([TaskItem].self, from: data) else {
-            if seedOnEmpty {
-                tasks = Self.seedTasks()
-                writeToDisk(tasks)
-            }
+        guard let data = try? Data(contentsOf: fileURL) else {
+            seedIfEmpty()
+            return
+        }
+        guard let decoded = try? JSONDecoder().decode([TaskItem].self, from: data) else {
+            // 解析失败：先备份损坏文件再重建，避免示例数据直接覆盖历史数据
+            let backup = fileURL.deletingPathExtension().appendingPathExtension("json.corrupt")
+            try? FileManager.default.removeItem(at: backup)
+            try? FileManager.default.copyItem(at: fileURL, to: backup)
+            DebugLog.write("tasks.json 解析失败，已备份到 \(backup.path)")
+            seedIfEmpty()
             return
         }
         tasks = decoded
+    }
+
+    private func seedIfEmpty() {
+        guard seedOnEmpty else { return }
+        tasks = Self.seedTasks()
+        writeToDisk(tasks)
     }
 
     private func writeToDisk(_ value: [TaskItem]) {

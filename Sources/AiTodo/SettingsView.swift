@@ -11,6 +11,7 @@ struct SettingsView: View {
     @AppStorage("aiModel") private var aiModel = AIProviderKind.zhipu.defaultModel
     @AppStorage("aiPrompt") private var aiPrompt = AITaskParser.defaultPrompt
     @State private var aiKey = AISettings.apiKey
+    @State private var keySaveTask: Task<Void, Never>?
     @State private var testing = false
     @State private var testResult: String?
     @State private var testOK = false
@@ -37,7 +38,7 @@ struct SettingsView: View {
                     SettingsCard(icon: "gearshape.fill", title: "通用") {
                         generalSection
                     }
-                    Text("待办 AiTodo v1.4.1 · 数据保存在本机")
+                    Text(Self.versionFooter)
                         .font(.system(size: 10))
                         .foregroundColor(Theme.textTertiary)
                         .frame(maxWidth: .infinity, alignment: .center)
@@ -47,7 +48,13 @@ struct SettingsView: View {
         }
         .frame(minWidth: 400, minHeight: 600)
         .background(glass ? Color.clear : Theme.appBackground)
-        .onDisappear { stopHotkeyRecording() }
+        .onDisappear { stopHotkeyRecording(); flushAPIKey() }
+    }
+
+    /// 版本号读 Info.plist，避免与打包脚本两处硬编码失同步
+    private static var versionFooter: String {
+        let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "dev"
+        return "待办 AiTodo v\(version) · 数据保存在本机"
     }
 
     // MARK: - 外观
@@ -89,6 +96,15 @@ struct SettingsView: View {
             SecureField("sk-…", text: $aiKey)
                 .textFieldStyle(.roundedBorder)
                 .font(.system(size: 12))
+                .onChange(of: aiKey) { newValue in
+                    // 停止输入 0.4s 后自动写入钥匙串，避免关窗口丢 Key
+                    keySaveTask?.cancel()
+                    keySaveTask = Task {
+                        try? await Task.sleep(nanoseconds: 400_000_000)
+                        guard !Task.isCancelled else { return }
+                        AISettings.apiKey = newValue
+                    }
+                }
 
             HStack(spacing: 6) {
                 TextField("Base URL", text: $aiBaseURL)
@@ -232,6 +248,13 @@ struct SettingsView: View {
         Text(title)
             .font(.system(size: 11))
             .foregroundColor(Theme.textTertiary)
+    }
+
+    /// 立即把输入中的 Key 落盘（离开设置页时调用，取消未触发的防抖任务）
+    private func flushAPIKey() {
+        keySaveTask?.cancel()
+        keySaveTask = nil
+        AISettings.apiKey = aiKey
     }
 
     // MARK: - 快捷键录制

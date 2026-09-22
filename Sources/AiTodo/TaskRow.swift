@@ -256,6 +256,8 @@ struct TaskRow: View {
             .onHover { hovered = $0 }
             .opacity(store.draggingID == sub.id ? 0.4 : 1)
             .onDrag {
+                // 已完成任务锁定：不允许把子任务拖出成为主任务
+                guard !locked else { return NSItemProvider() }
                 // 拖出成为主任务：放置引擎会自动从子任务提升
                 onDragStarted()
                 return NSItemProvider(object: sub.id.uuidString as NSString)
@@ -290,7 +292,7 @@ struct TaskRow: View {
     }
 
     @ViewBuilder private var trailingControls: some View {
-        if !locked, let due = task.dueDate {
+        if let due = task.dueDate {
             Button {
                 dueDraft = due
                 showsDuePopover = true
@@ -298,7 +300,7 @@ struct TaskRow: View {
                 DueChip(text: DueChipText.text(for: due), isOverdue: isOverdue)
             }
             .buttonStyle(.plain)
-            .help("修改提醒时间")
+            .help(locked ? "提醒时间（已完成，不可修改）" : "修改提醒时间")
         }
 
         if hovered {
@@ -312,10 +314,6 @@ struct TaskRow: View {
             // GSAP：微交互从尾侧缩放淡入（back.out 手感）
             .transition(.scale(scale: 0.8, anchor: .trailing).combined(with: .opacity))
         }
-    }
-
-    private func chipLabel(_ text: String) -> some View {
-        DueChip(text: text, isOverdue: isOverdue)
     }
 
     private var clockButton: some View {

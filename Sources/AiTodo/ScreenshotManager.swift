@@ -158,26 +158,32 @@ final class OverlayWindow: NSWindow {
 final class SelectionCoordinator {
     private var windows: [NSWindow] = []
     private var escMonitor: Any?
+    private var globalEscMonitor: Any?
     private var cancelHandler: (() -> Void)?
 
     func begin(onComplete: @escaping (Data?) -> Void) {
         close()
-        // Esc 取消：本地监听（覆盖窗被点击激活应用后生效）
+        // Esc 取消：覆盖窗不激活应用，热键触发时本应用通常在后台——
+        // 本地监视器覆盖应用活跃时（点过覆盖窗后），全局监视器覆盖后台时的按键
         escMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
             guard event.keyCode == 53 else { return event }
             self?.cancelHandler?()
             return nil
+        }
+        globalEscMonitor = NSEvent.addGlobalMonitorForEvents(matching: .keyDown) { [weak self] event in
+            guard event.keyCode == 53 else { return }
+            DispatchQueue.main.async { self?.cancelHandler?() }
         }
         cancelHandler = { [weak self] in
             self?.close()
             onComplete(nil)
         }
         for screen in NSScreen.screens {
-            let window = NSWindow(contentRect: screen.frame,
-                                  styleMask: .borderless,
-                                  backing: .buffered,
-                                  defer: false,
-                                  screen: screen)
+            let window = OverlayWindow(contentRect: screen.frame,
+                                       styleMask: .borderless,
+                                       backing: .buffered,
+                                       defer: false,
+                                       screen: screen)
             window.level = .screenSaver
             window.isOpaque = false
             window.backgroundColor = .clear
@@ -221,6 +227,10 @@ final class SelectionCoordinator {
             NSEvent.removeMonitor(monitor)
             escMonitor = nil
         }
+        if let monitor = globalEscMonitor {
+            NSEvent.removeMonitor(monitor)
+            globalEscMonitor = nil
+        }
         cancelHandler = nil
         windows.forEach { $0.orderOut(nil) }
         windows.removeAll()
@@ -228,19 +238,16 @@ final class SelectionCoordinator {
 
 }
 
-// MARK: - 屏幕截图（ScreenCaptureKit，macOS 13/x86_64 回退 CGDisplayCreateImage）
+// MARK: - 屏幕截图（ScreenCaptureKit，macOS 13 及以下回退 CGDisplayCreateImage + 选区裁剪）
+// 注：CGDisplayCreateImage 在 SDK 中标注 obsoleted=15.0，因此编译目标必须是 13.0/14.x；
+// 若目标 ≥ 15.0（如不传 -target 用宿主机默认），该调用会直接编译报错。
 
 enum CaptureDisplay {
     static func image(displayID: CGDirectDisplayID, sourceRect: CGRect, pixelScale: CGFloat) async throws -> CGImage {
-        #if arch(x86_64)
-        // CGDisplayCreateImage 在 arm64 目标被标记不可用，仅 Intel 编译纳入回退
         if #available(macOS 14.0, *) {
             return try await screenCaptureKitImage(displayID: displayID, sourceRect: sourceRect, pixelScale: pixelScale)
         }
         return try legacyDisplayImage(displayID: displayID, sourceRect: sourceRect)
-        #else
-        return try await screenCaptureKitImage(displayID: displayID, sourceRect: sourceRect, pixelScale: pixelScale)
-        #endif
     }
 
     @available(macOS 14.0, *)
@@ -260,7 +267,6 @@ enum CaptureDisplay {
         return try await SCScreenshotManager.captureImage(contentFilter: filter, configuration: config)
     }
 
-    #if arch(x86_64)
     /// 选区坐标为显示器本地坐标（顶部原点），整屏截取后按像素密度裁剪
     private static func legacyDisplayImage(displayID: CGDirectDisplayID, sourceRect: CGRect) throws -> CGImage {
         guard let full = CGDisplayCreateImage(displayID) else {
@@ -276,7 +282,6 @@ enum CaptureDisplay {
         }
         return cropped
     }
-    #endif
 }
 
 // MARK: - 选区覆盖视图

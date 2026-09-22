@@ -16,12 +16,14 @@ struct RootView: View {
 
     private var skin: AppSkin { AppSkin.from(skinRaw) }
 
-    private var dateLine: String {
+    private static let dateLineFormatter: DateFormatter = {
         let formatter = DateFormatter()
         formatter.locale = Locale(identifier: "zh_CN")
         formatter.dateFormat = "yyyy年M月d日 · EEEE"
-        return formatter.string(from: Date())
-    }
+        return formatter
+    }()
+
+    private var dateLine: String { Self.dateLineFormatter.string(from: Date()) }
 
     var body: some View {
         ZStack {
@@ -64,6 +66,8 @@ struct RootView: View {
         }
         .onChange(of: skinRaw) { _ in Self.applyAppAppearance() }
         .onAppear {
+            // 启动即按已保存的皮肤设置系统外观（AppDelegate 默认深色，纯白皮肤需要纠正）
+            Self.applyAppAppearance()
             FloatingBallManager.shared.start(store: store)
             RecognitionPanelController.shared.start(store: store)
         }

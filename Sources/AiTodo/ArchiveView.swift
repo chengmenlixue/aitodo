@@ -264,7 +264,7 @@ struct ArchiveRow: View {
                     .font(.system(size: 10, weight: .semibold))
                     .foregroundColor(Theme.textTertiary)
                     .frame(width: 24, height: 24)
-                    .background(Circle().fill(Color.white.opacity(0.07)))
+                    .background(Circle().fill(Theme.controlCircle))
             }
             .buttonStyle(.plain)
             .help("永久删除")
