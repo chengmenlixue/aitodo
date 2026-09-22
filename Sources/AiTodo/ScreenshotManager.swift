@@ -184,10 +184,14 @@ final class SelectionCoordinator {
                                        backing: .buffered,
                                        defer: false,
                                        screen: screen)
-            window.level = .screenSaver
+            // 层级必须高于全屏应用窗口（现代 macOS 全屏窗口挂在高层级，.screenSaver 会被盖住）、
+            // 高于菜单栏：shielding 是系统截图类工具选区遮罩的标准层级
+            window.level = NSWindow.Level(rawValue: Int(CGShieldingWindowLevel()))
             window.isOpaque = false
             window.backgroundColor = .clear
-            window.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
+            // canJoinAllSpaces+fullScreenAuxiliary：遮罩出现在每个显示器/每个 Space（含全屏 Space）
+            // stationary：不被调度中心/Exposé 干扰
+            window.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary]
             window.ignoresMouseEvents = false
 
             let view = SelectionOverlayView(frame: NSRect(origin: .zero, size: screen.frame.size))
