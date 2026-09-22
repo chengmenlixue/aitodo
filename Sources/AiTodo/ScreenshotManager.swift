@@ -73,7 +73,12 @@ final class ScreenshotManager: ObservableObject {
     }
 
     private func handleCapture(_ imageData: Data?) {
-        guard let data = imageData else { return }
+        guard let data = imageData else {
+            // 截图失败不静默：给出可见的错误卡片（捕获/裁剪环节的失败原因会同时写入调试日志）
+            lastError = "未能捕获屏幕内容，请重试；若反复出现，请带着 AITODO_DEBUG=1 的日志反馈"
+            phase = .failed(lastError!)
+            return
+        }
         phase = .recognizing
         Task {
             do {
@@ -150,8 +155,9 @@ final class HotKeyCenter {
 
 // MARK: - 选区覆盖窗协调
 
-/// 覆盖窗：borderless 且允许成为 key（接收 Esc）
-final class OverlayWindow: NSWindow {
+/// 选区遮罩面板：非激活面板（NSPanel）才能以未激活应用身份进入全屏 Space——
+/// 普通 NSWindow 在应用未激活时会被窗口服务器排除在全屏 Space 之外（悬浮球一直可见即此原理）
+final class OverlayPanel: NSPanel {
     override var canBecomeKey: Bool { true }
 }
 
@@ -178,21 +184,26 @@ final class SelectionCoordinator {
             self?.close()
             onComplete(nil)
         }
-        for screen in NSScreen.screens {
-            let window = OverlayWindow(contentRect: screen.frame,
-                                       styleMask: .borderless,
-                                       backing: .buffered,
-                                       defer: false,
-                                       screen: screen)
-            // 层级必须高于全屏应用窗口（现代 macOS 全屏窗口挂在高层级，.screenSaver 会被盖住）、
-            // 高于菜单栏：shielding 是系统截图类工具选区遮罩的标准层级
-            window.level = NSWindow.Level(rawValue: Int(CGShieldingWindowLevel()))
-            window.isOpaque = false
-            window.backgroundColor = .clear
+        let screens = NSScreen.screens
+        DebugLog.write("选区遮罩：\(screens.count) 块屏幕，frames=\(screens.map { NSStringFromRect($0.frame) })")
+        for screen in screens {
+            // 不传 screen: 提示（canJoinAllSpaces 面板按 frame 落位即可，显式提示在某些
+            // 多屏配置下会把面板钉在单屏的 Space 上，导致副屏不显示）
+            let panel = OverlayPanel(contentRect: screen.frame,
+                                     styleMask: [.borderless, .nonactivatingPanel],
+                                     backing: .buffered,
+                                     defer: false)
+            // 层级高于全屏应用窗口与菜单栏：shielding 是系统截图类工具选区遮罩的标准层级
+            panel.level = NSWindow.Level(rawValue: Int(CGShieldingWindowLevel()))
+            panel.isOpaque = false
+            panel.backgroundColor = .clear
+            panel.hasShadow = false
+            panel.hidesOnDeactivate = false
+            panel.isMovableByWindowBackground = false
             // canJoinAllSpaces+fullScreenAuxiliary：遮罩出现在每个显示器/每个 Space（含全屏 Space）
             // stationary：不被调度中心/Exposé 干扰
-            window.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary]
-            window.ignoresMouseEvents = false
+            panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary]
+            panel.ignoresMouseEvents = false
 
             let view = SelectionOverlayView(frame: NSRect(origin: .zero, size: screen.frame.size))
             view.onComplete = { [weak self] viewRect in
@@ -202,6 +213,7 @@ final class SelectionCoordinator {
                 let bounds = CGRect(x: 0, y: 0, width: screen.frame.width, height: screen.frame.height)
                 let sourceRect = bounds.intersection(viewRect)
                 let pixelScale = screen.backingScaleFactor
+                DebugLog.write("选区完成：displayID=\(displayID) rect=\(NSStringFromRect(sourceRect)) scale=\(pixelScale)")
                 self?.close()
                 Task { @MainActor in
                     do {
@@ -209,6 +221,7 @@ final class SelectionCoordinator {
                                                                    sourceRect: sourceRect,
                                                                    pixelScale: pixelScale)
                         let data = CaptureImageTool.png(from: image, maxLongSide: 1600)
+                        DebugLog.write("捕获成功：displayID=\(displayID) PNG=\(data?.count ?? 0) 字节")
                         onComplete(data)
                     } catch {
                         DebugLog.write("截图失败：\(error.localizedDescription)")
@@ -219,10 +232,21 @@ final class SelectionCoordinator {
             view.onCancel = { [weak self] in
                 self?.cancelHandler?()
             }
-            window.contentView = view
+            panel.contentView = view
             // orderFrontRegardless：不激活应用、不抢焦点，其他应用界面截图不跳动
-            window.orderFrontRegardless()
-            windows.append(window)
+            panel.orderFrontRegardless()
+            windows.append(panel)
+        }
+        // 窗口服务器落位后统一再压一次前台：修复副屏面板首次落位被吞的竞态
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.12) { [weak self] in
+            self?.windows.forEach { $0.orderFrontRegardless() }
+        }
+        // 落位后复核：每块遮罩的实际状态（诊断拓展屏不出遮罩）
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { [weak self] in
+            guard let self else { return }
+            for (index, panel) in self.windows.enumerated() {
+                DebugLog.write("遮罩[\(index)]: frame=\(NSStringFromRect(panel.frame)) visible=\(panel.isVisible) screen=\(panel.screen?.localizedName ?? "nil") level=\(panel.level.rawValue)")
+            }
         }
     }
 
