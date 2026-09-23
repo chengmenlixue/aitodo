@@ -8,6 +8,7 @@ struct AIResultPanel: View {
 
     @FocusState private var focusedRow: UUID?
     @State private var keyMonitor: Any?
+    @State private var expandedQuadrantRow: UUID?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -28,8 +29,9 @@ struct AIResultPanel: View {
 
             ScrollView(.vertical, showsIndicators: true) {
                 VStack(spacing: 8) {
-                    ForEach($manager.resultTasks) { $task in
-                        resultRow($task)
+                    ForEach(manager.resultTasks.indices, id: \.self) { index in
+                        resultRow($manager.resultTasks[index],
+                                  opensUpward: index == manager.resultTasks.count - 1)
                     }
                 }
             }
@@ -123,7 +125,7 @@ struct AIResultPanel: View {
         .help("选择主任务后，该条将作为其子任务添加")
     }
 
-    private func resultRow(_ task: Binding<ParsedTask>) -> some View {
+    private func resultRow(_ task: Binding<ParsedTask>, opensUpward: Bool) -> some View {
         HStack(spacing: 10) {
             Button {
                 task.selected.wrappedValue.toggle()
@@ -141,26 +143,19 @@ struct AIResultPanel: View {
                 .foregroundColor(Theme.textPrimary)
                 .focused($focusedRow, equals: task.id)
 
-            Menu {
-                ForEach(Quadrant.allCases) { quadrant in
-                    Button(quadrant.title) { task.quadrant.wrappedValue = quadrant }
+            QuadrantPicker(
+                quadrant: task.quadrant,
+                isExpanded: expandedQuadrantRow == task.wrappedValue.id,
+                isDisabled: task.parentID != nil,
+                opensUpward: opensUpward,
+                toggle: {
+                    expandedQuadrantRow = expandedQuadrantRow == task.wrappedValue.id ? nil : task.wrappedValue.id
+                },
+                pick: { quadrant in
+                    task.quadrant.wrappedValue = quadrant
+                    expandedQuadrantRow = nil
                 }
-            } label: {
-                HStack(spacing: 5) {
-                    Circle()
-                        .fill(task.quadrant.wrappedValue.accent)
-                        .frame(width: 8, height: 8)
-                    Text(task.quadrant.wrappedValue.title)
-                        .font(.system(size: 11))
-                        .foregroundColor(Theme.textSecondary)
-                }
-            }
-            .menuStyle(.borderlessButton)
-            .menuIndicator(.hidden)
-            .fixedSize()
-            .opacity(task.parentID == nil ? 1 : 0.3)
-            .disabled(task.parentID != nil)
-
+            )
             parentAttachMenu(task)
         }
         .padding(.horizontal, 10)
@@ -180,5 +175,94 @@ struct AIResultPanel: View {
             }
         }
         manager.dismissResults()
+    }
+}
+
+/// 单行的象限选择控件：胶囊标签 + 内联自绘下拉选项
+/// 不用 SwiftUI Menu：系统菜单的弹出依赖应用激活态，而识别面板是不激活面板——
+/// 应用在后台时点 Menu 毫无响应（用户反馈「类型点不动」）。
+/// Button + 自绘选项列表不经过 NSMenu，应用未激活时同样可点可选。
+private struct QuadrantPicker: View {
+    @Binding var quadrant: Quadrant
+    let isExpanded: Bool
+    let isDisabled: Bool
+    let opensUpward: Bool
+    let toggle: () -> Void
+    let pick: (Quadrant) -> Void
+
+    @State private var hovering = false
+
+    var body: some View {
+        label
+            .overlay(alignment: opensUpward ? .top : .bottom) {
+                if isExpanded {
+                    options.offset(y: opensUpward ? -58 : 58).zIndex(20)
+                }
+            }
+    }
+
+    private var label: some View {
+        Button(action: toggle) {
+            HStack(spacing: 5) {
+                Circle()
+                    .fill(quadrant.accent)
+                    .frame(width: 8, height: 8)
+                Text(quadrant.title)
+                    .font(.system(size: 11))
+                    .foregroundColor(Theme.textSecondary)
+                Image(systemName: "chevron.up.chevron.down")
+                    .font(.system(size: 7, weight: .bold))
+                    .foregroundColor(Theme.textTertiary)
+            }
+            .padding(.horizontal, 7)
+            .padding(.vertical, 4)
+            .background(Capsule().fill(Color.white.opacity(hovering ? 0.12 : 0.06)))
+            .contentShape(Capsule())
+        }
+        .buttonStyle(.plain)
+        .disabled(isDisabled)
+        .opacity(isDisabled ? 0.3 : 1)
+        .onHover { hovering = $0 }
+        .help(isDisabled ? "已作为子任务，象限跟随主任务" : "点击选择象限")
+    }
+
+    private var options: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            ForEach(Quadrant.allCases) { candidate in
+                Button {
+                    pick(candidate)
+                } label: {
+                    HStack(spacing: 6) {
+                        Circle()
+                            .fill(candidate.accent)
+                            .frame(width: 7, height: 7)
+                        Text(candidate.title)
+                            .font(.system(size: 11))
+                            .foregroundColor(candidate == quadrant ? Theme.textPrimary : Theme.textSecondary)
+                        Spacer(minLength: 0)
+                        if candidate == quadrant {
+                            Image(systemName: "checkmark")
+                                .font(.system(size: 9, weight: .bold))
+                                .foregroundColor(candidate.accent)
+                        }
+                    }
+                    .padding(.horizontal, 9)
+                    .padding(.vertical, 5)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .padding(4)
+        .frame(width: 136)
+        .background(
+            RoundedRectangle(cornerRadius: 9, style: .continuous)
+                .fill(Theme.cardBase)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 9, style: .continuous)
+                .strokeBorder(Color.white.opacity(0.1), lineWidth: 0.5)
+        )
+        .shadow(color: .black.opacity(0.35), radius: 6, y: 3)
     }
 }

@@ -64,6 +64,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
                 }
             }
         }
+        if ProcessInfo.processInfo.environment["AITODO_TEST_RECOGNITION"] != nil {
+            // 调试用：跳过截图流程直接注入识别结果弹出确认面板（验证面板交互）
+            DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
+                ScreenshotManager.shared.resultTasks = [
+                    ParsedTask(title: "将云数据素材补充完整", quadrant: .importantNotUrgent),
+                    ParsedTask(title: "修复企业知识库删除同步 bug", quadrant: .importantNotUrgent)
+                ]
+                ScreenshotManager.shared.phase = .results
+            }
+            // +3s：面板落位后把 frame 写成 CG 全局坐标（顶左原点），供合成点击定位
+            DispatchQueue.main.asyncAfter(deadline: .now() + 3) {
+                guard let panel = NSApp.windows.first(where: { $0 is RecognitionPanel }),
+                      let screen = NSScreen.main else { return }
+                let frame = panel.frame
+                let text = "\(Int(frame.origin.x)) \(Int(screen.frame.height - frame.maxY)) \(Int(frame.width)) \(Int(frame.height))"
+                try? text.write(toFile: "/tmp/aitodo_recognition_frame.txt", atomically: true, encoding: .utf8)
+                DebugLog.write("识别面板 frame(CG)：\(text) appActive=\(NSApp.isActive)")
+            }
+        }
     }
 
     /// 应用被激活（如识别结果面板 NSApp.activate）时的副作用防御：

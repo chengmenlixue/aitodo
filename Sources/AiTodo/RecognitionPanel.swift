@@ -10,6 +10,7 @@ final class RecognitionPanelController: NSObject {
     private var panel: RecognitionPanel?
     private var store: TaskStore?
     private var subscription: AnyCancellable?
+    private var activationMonitor: Any?
 
     func start(store: TaskStore) {
         guard self.store == nil else { return }
@@ -24,6 +25,16 @@ final class RecognitionPanelController: NSObject {
                     self?.panel?.orderOut(nil)
                 }
             }
+        // 面板是非激活面板：点击不会像普通窗口那样顺带激活应用。而 SwiftUI Menu
+        // （「子任务」菜单）在应用未激活时弹出无效——表现为点击无响应。
+        // 用户点击面板本身即是明确的交互意图，先激活应用再放行事件，
+        // 保证菜单在首次点击即可弹出
+        activationMonitor = NSEvent.addLocalMonitorForEvents(matching: .leftMouseDown) { [weak self] event in
+            guard let panel = self?.panel, panel.isVisible,
+                  event.window === panel, !NSApp.isActive else { return event }
+            NSApp.activate(ignoringOtherApps: true)
+            return event
+        }
     }
 
     private func ensurePanel() -> RecognitionPanel {
