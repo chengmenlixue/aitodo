@@ -235,6 +235,11 @@ final class SelectionCoordinator {
             panel.contentView = view
             // orderFrontRegardless：不激活应用、不抢焦点，其他应用界面截图不跳动
             panel.orderFrontRegardless()
+            // 随即建 key：nonactivatingPanel 建 key 不会激活应用，先把"窗口未建 key
+            // 时首个 mouseDown 被消耗在建 key 上"这个坑绕开（首点拉不出选区的根源）。
+            // 多屏时只有最后一块保持 key，其余面板靠 SelectionOverlayView 的
+            // acceptsFirstMouse 兜底
+            panel.makeKeyAndOrderFront(nil)
             windows.append(panel)
         }
         // 窗口服务器落位后统一再压一次前台：修复副屏面板首次落位被吞的竞态
@@ -324,8 +329,15 @@ final class SelectionOverlayView: NSView {
     override var acceptsFirstResponder: Bool { true }
     override var isFlipped: Bool { true }   // 顶部原点，截图换算更直观
 
+    // 热键触发时本应用通常在后台：NSView 默认不接受"未激活窗口上的第一击"，
+    // 该 mouseDown 被消耗在建 key 上而不下发给视图——即第一次点击拉不出选区。
+    // 返回 true 让首击直接进入 mouseDown（第二重保险，覆盖未成为 key 的那块屏）
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+
     override func mouseDown(with event: NSEvent) {
-        startPoint = convert(event.locationInWindow, from: nil)
+        let point = convert(event.locationInWindow, from: nil)
+        DebugLog.write("选区 mouseDown：\(NSStringFromPoint(point)) windowKey=\(window?.isKeyWindow ?? false)")
+        startPoint = point
         currentPoint = startPoint
         needsDisplay = true
     }
