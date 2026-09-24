@@ -18,10 +18,16 @@ final class SmartReminderBannerController {
         dismiss()
         guard let screen = NSScreen.main else { return }
 
-        let view = SmartReminderBannerView(title: title, message: message, stats: stats) { [weak self] in
-            self?.dismiss()
-            FloatingBallManager.shared.restoreMainWindow()
-        }
+        let view = SmartReminderBannerView(
+            title: title,
+            message: message,
+            stats: stats,
+            onOpen: { [weak self] in
+                self?.dismiss()
+                FloatingBallManager.shared.restoreMainWindow()
+            },
+            onClose: { [weak self] in self?.dismiss() }
+        )
         let panel = SmartReminderBannerPanel(
             contentRect: NSRect(x: 0, y: 0, width: 340, height: 100),
             styleMask: [.borderless, .nonactivatingPanel],
@@ -83,7 +89,10 @@ struct SmartReminderBannerView: View {
     let title: String
     let message: String
     let stats: String?
+    /// 点击横幅主体：关闭并打开主窗口
     let onOpen: () -> Void
+    /// 点击 ✕：仅关闭本条提醒
+    let onClose: () -> Void
 
     // 横幅悬浮在任意亮暗内容上，且要不受皮肤（纯白/深色）影响，
     // 固定用高对比深底浅字，不取 Theme（会随皮肤翻转为白底暗字或中灰正文）
@@ -160,6 +169,15 @@ struct SmartReminderBannerView: View {
                 }
             }
             Spacer(minLength: 0)
+            Button(action: onClose) {
+                Image(systemName: "xmark")
+                    .font(.system(size: 9, weight: .bold))
+                    .foregroundColor(Color(hex: 0x9FA0A6))
+                    .frame(width: 20, height: 20)
+                    .background(Circle().fill(Color.white.opacity(0.08)))
+            }
+            .buttonStyle(.plain)
+            .help("关闭本条提醒")
         }
         .padding(16)
         .frame(width: 380, alignment: .leading)

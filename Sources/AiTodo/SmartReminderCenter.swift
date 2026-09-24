@@ -124,8 +124,8 @@ final class SmartReminderCenter {
         store.tasks.filter { !$0.isArchived && !$0.isDone }
     }
 
-    /// 执行一次总结并提醒；无任务走本地文案（不调 AI），失败不发通知只记结果。
-    /// 通知走系统（进通知中心存档，纯文本），前台展示用应用内横幅（渲染 Markdown）
+    /// 执行一次总结并提醒；无任务走本地文案（不调 AI），失败静默只记结果。
+    /// 只用应用内横幅展示（不发系统通知）：时长可控、带图标、可手动关闭
     private static func performSummary(pending: [TaskItem]) async -> String {
         do {
             let body: String
@@ -139,14 +139,12 @@ final class SmartReminderCenter {
                     try await AITaskParser.summarizeTasks(lines)
                 }
             }
-            let plain = plainText(fromMarkdown: body)
-            ReminderCenter.postSummary(title: summaryTitle, body: suffix.isEmpty ? plain : plain + "\n" + suffix)
             await MainActor.run {
                 SmartReminderBannerController.shared.show(title: summaryTitle, message: body, stats: suffix.isEmpty ? nil : suffix)
                 record(result: "✅ 成功 · \(timeFormatter.string(from: Date()))")
             }
-            DebugLog.write("智能提醒完成：已发送通知与应用内横幅（\(pending.count) 项）")
-            return "✅ 已发送总结通知"
+            DebugLog.write("智能提醒完成：已显示提醒横幅（\(pending.count) 项）")
+            return "✅ 已显示提醒横幅"
         } catch {
             DebugLog.write("智能提醒失败：\(error.localizedDescription)")
             await MainActor.run {
@@ -154,20 +152,6 @@ final class SmartReminderCenter {
             }
             return "❌ \(error.localizedDescription)"
         }
-    }
-
-    /// 系统通知不渲染 Markdown：去掉加粗标记、列表前缀换成圆点
-    private static func plainText(fromMarkdown markdown: String) -> String {
-        markdown.components(separatedBy: "\n").map { rawLine in
-            var line = rawLine.trimmingCharacters(in: .whitespaces)
-            for prefix in ["- ", "• ", "* "] where line.hasPrefix(prefix) {
-                line = "• " + line.dropFirst(prefix.count)
-                break
-            }
-            return line.replacingOccurrences(of: "**", with: "")
-        }
-        .filter { !$0.isEmpty }
-        .joined(separator: "\n")
     }
 
     // MARK: - 提示词组装

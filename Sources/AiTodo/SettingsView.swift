@@ -260,7 +260,7 @@ struct SettingsView: View {
                         .lineLimit(2)
                 }
 
-                Text("总结由所配置的 AI 服务商生成，通知点击可打开主窗口；无未完成任务时发本地提醒，不调用 AI")
+                Text("总结由所配置的 AI 服务商生成，应用内横幅展示 20 秒：点击打开主窗口，右上角 ✕ 关闭；无未完成任务时发本地提醒，不调用 AI")
                     .font(.system(size: 10))
                     .foregroundColor(Theme.textTertiary)
             }
