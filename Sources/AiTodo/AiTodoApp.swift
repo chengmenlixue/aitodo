@@ -64,6 +64,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
                 }
             }
         }
+        if ProcessInfo.processInfo.environment["AITODO_TEST_SMART_REMINDER"] != nil {
+            // 调试用：启动 5 秒后强制触发一次 AI 智能提醒（验证 AI 链路与通知横幅）
+            DispatchQueue.main.asyncAfter(deadline: .now() + 5) {
+                Task { _ = await SmartReminderCenter.shared.summarizeNowManually() }
+            }
+        }
         if ProcessInfo.processInfo.environment["AITODO_TEST_RECOGNITION"] != nil {
             // 调试用：跳过截图流程直接注入识别结果弹出确认面板（验证面板交互）
             DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
@@ -163,6 +169,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
                                 willPresent notification: UNNotification,
                                 withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void) {
         DebugLog.write("前台通知 willPresent：\(notification.request.content.title)")
-        completionHandler([.banner, .sound])
+        // AI 总结在前台用应用内横幅展示（时长可控、带图标），系统侧只进通知中心存档；
+        // 其余通知（待办提醒等）维持系统横幅
+        if notification.request.identifier == ReminderCenter.summaryIdentifier {
+            completionHandler([.list])
+        } else {
+            completionHandler([.banner, .sound])
+        }
+    }
+
+    /// 点击通知横幅：打开主窗口。须走 restoreMainWindow（内部处理 ⌘W 关闭防御与
+    /// deminiaturize），直接 NSApp.activate 会被 applicationDidBecomeActive 压回
+    func userNotificationCenter(_ center: UNUserNotificationCenter,
+                                didReceive response: UNNotificationResponse,
+                                withCompletionHandler completionHandler: @escaping () -> Void) {
+        DebugLog.write("通知点击：\(response.notification.request.identifier)")
+        FloatingBallManager.shared.restoreMainWindow()
+        completionHandler()
     }
 }

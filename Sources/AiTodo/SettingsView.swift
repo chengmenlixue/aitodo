@@ -10,11 +10,18 @@ struct SettingsView: View {
     @AppStorage("aiBaseURL") private var aiBaseURL = AIProviderKind.zhipu.defaultBaseURL
     @AppStorage("aiModel") private var aiModel = AIProviderKind.zhipu.defaultModel
     @AppStorage("aiPrompt") private var aiPrompt = AITaskParser.defaultPrompt
+    @AppStorage("smartReminderEnabled") private var smartReminderEnabled = false
+    @AppStorage("smartReminderMode") private var smartReminderMode = "interval"
+    @AppStorage("smartReminderIntervalMinutes") private var smartReminderIntervalRaw = 120
+    @AppStorage("smartReminderDailyHour") private var smartReminderDailyHour = 9
+    @AppStorage("smartReminderDailyMinute") private var smartReminderDailyMinute = 0
+    @AppStorage("smartReminderLastResult") private var smartReminderLastResult = ""
     @State private var aiKey = AISettings.apiKey
     @State private var keySaveTask: Task<Void, Never>?
     @State private var testing = false
     @State private var testResult: String?
     @State private var testOK = false
+    @State private var summarizing = false
     @State private var recordingHotkey = false
     @State private var hotkeyMonitor: Any?
 
@@ -34,6 +41,9 @@ struct SettingsView: View {
                     }
                     SettingsCard(icon: "sparkles", title: "AI 截图解析") {
                         aiSection
+                    }
+                    SettingsCard(icon: "bell.badge.fill", title: "AI 智能提醒") {
+                        smartReminderSection
                     }
                     SettingsCard(icon: "gearshape.fill", title: "通用") {
                         generalSection
@@ -166,6 +176,94 @@ struct SettingsView: View {
             Text("隐私：截图仅在你按下快捷键时发送给所配置的 AI 服务商")
                 .font(.system(size: 10))
                 .foregroundColor(Theme.textTertiary)
+        }
+    }
+
+    // MARK: - AI 智能提醒
+
+    /// 每日定时的时间选择绑定：与持久化的时/分两个 Int 互转
+    private var dailyTimeBinding: Binding<Date> {
+        Binding(
+            get: {
+                Calendar.current.date(bySettingHour: smartReminderDailyHour,
+                                      minute: smartReminderDailyMinute, second: 0, of: Date()) ?? Date()
+            },
+            set: { newValue in
+                let components = Calendar.current.dateComponents([.hour, .minute], from: newValue)
+                smartReminderDailyHour = components.hour ?? 9
+                smartReminderDailyMinute = components.minute ?? 0
+            }
+        )
+    }
+
+    private var smartReminderSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Toggle(isOn: $smartReminderEnabled) {
+                Text("定时用 AI 总结未完成任务并通知我")
+                    .font(.system(size: 13))
+                    .foregroundColor(Theme.textPrimary)
+            }
+            .toggleStyle(.switch)
+            .onChange(of: smartReminderEnabled) { enabled in
+                if enabled {
+                    ReminderCenter.requestAuthorizationIfNeeded()
+                }
+                // 开启后立即重估（首次开启 ≤30 秒内收到第一条总结）
+                SmartReminderCenter.shared.settingsChanged()
+            }
+
+            if smartReminderEnabled {
+                Picker("", selection: $smartReminderMode) {
+                    Text("固定间隔").tag("interval")
+                    Text("每日定时").tag("daily")
+                }
+                .pickerStyle(.segmented)
+                .labelsHidden()
+                .onChange(of: smartReminderMode) { _ in
+                    SmartReminderCenter.shared.settingsChanged()
+                }
+
+                if smartReminderMode == "daily" {
+                    DatePicker("提醒时间", selection: dailyTimeBinding, displayedComponents: .hourAndMinute)
+                        .labelsHidden()
+                } else {
+                    Picker("", selection: $smartReminderIntervalRaw) {
+                        Text("15 分钟").tag(15)
+                        Text("30 分钟").tag(30)
+                        Text("1 小时").tag(60)
+                        Text("2 小时").tag(120)
+                        Text("4 小时").tag(240)
+                    }
+                    .pickerStyle(.segmented)
+                    .labelsHidden()
+                    .onChange(of: smartReminderIntervalRaw) { _ in
+                        SmartReminderCenter.shared.settingsChanged()
+                    }
+                }
+
+                HStack(spacing: 6) {
+                    Button("立即总结一次") { summarizeNow() }
+                        .buttonStyle(.plain)
+                        .font(.system(size: 12))
+                        .foregroundColor(Theme.textSecondary)
+                        .disabled(summarizing)
+                    if summarizing {
+                        ProgressView().scaleEffect(0.5)
+                    }
+                    Spacer()
+                }
+
+                if !smartReminderLastResult.isEmpty {
+                    Text("最近结果：\(smartReminderLastResult)")
+                        .font(.system(size: 11))
+                        .foregroundColor(smartReminderLastResult.hasPrefix("✅") ? .green : Theme.overdue)
+                        .lineLimit(2)
+                }
+
+                Text("总结由所配置的 AI 服务商生成，通知点击可打开主窗口；无未完成任务时发本地提醒，不调用 AI")
+                    .font(.system(size: 10))
+                    .foregroundColor(Theme.textTertiary)
+            }
         }
     }
 
@@ -304,6 +402,22 @@ struct SettingsView: View {
             hotkeyMonitor = nil
         }
         recordingHotkey = false
+    }
+
+    // MARK: - 智能提醒手动触发
+
+    private func summarizeNow() {
+        // 与测试连接一致：先把界面上的 AI 配置落盘再发起请求
+        flushAPIKey()
+        AISettings.provider = provider
+        AISettings.baseURL = aiBaseURL
+        AISettings.model = aiModel
+        summarizing = true
+        Task {
+            // 结果文案由 summarizeNowManually 写入「最近结果」（@AppStorage 自动刷新）
+            _ = await SmartReminderCenter.shared.summarizeNowManually()
+            await MainActor.run { summarizing = false }
+        }
     }
 
     // MARK: - 测试连接

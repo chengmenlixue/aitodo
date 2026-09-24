@@ -70,6 +70,7 @@ struct RootView: View {
             Self.applyAppAppearance()
             FloatingBallManager.shared.start(store: store)
             RecognitionPanelController.shared.start(store: store)
+            SmartReminderCenter.shared.start(store: store)
         }
     }
 
